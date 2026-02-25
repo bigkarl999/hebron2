@@ -1,0 +1,103 @@
+import { useState } from "react";
+import { Link, useLocation } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Menu, X, Calendar, BookOpen, Shield, Flame } from "lucide-react";
+
+export const Navigation = () => {
+  const [isOpen, setIsOpen] = useState(false);
+  const location = useLocation();
+
+  const navLinks = [
+    { href: "/book", label: "Book a Slot", icon: BookOpen },
+    { href: "/calendar", label: "Calendar", icon: Calendar },
+    { href: "/admin/login", label: "Admin", icon: Shield },
+  ];
+
+  const isActive = (path) => location.pathname === path;
+
+  return (
+    <nav className="sticky top-0 z-50 w-full border-b border-orange-100 bg-white/80 backdrop-blur-md">
+      <div className="container mx-auto px-4">
+        <div className="flex h-16 items-center justify-between">
+          {/* Logo */}
+          <Link
+            to="/"
+            className="flex items-center gap-2 font-semibold"
+            data-testid="nav-logo"
+          >
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-orange-500 to-red-600">
+              <Flame className="h-5 w-5 text-white" />
+            </div>
+            <span className="hidden font-['Playfair_Display'] text-lg text-foreground sm:inline-block">
+              Hebron PA UK
+            </span>
+          </Link>
+
+          {/* Desktop Navigation */}
+          <div className="hidden items-center gap-1 md:flex">
+            {navLinks.map((link) => (
+              <Link key={link.href} to={link.href}>
+                <Button
+                  variant={isActive(link.href) ? "default" : "ghost"}
+                  className={`gap-2 ${
+                    isActive(link.href)
+                      ? "bg-gradient-to-r from-orange-500 to-red-600 text-white"
+                      : "text-muted-foreground hover:text-foreground hover:bg-orange-50"
+                  }`}
+                  data-testid={`nav-${link.label.toLowerCase().replace(/\s+/g, "-")}`}
+                >
+                  <link.icon className="h-4 w-4" />
+                  {link.label}
+                </Button>
+              </Link>
+            ))}
+          </div>
+
+          {/* Mobile Navigation */}
+          <Sheet open={isOpen} onOpenChange={setIsOpen}>
+            <SheetTrigger asChild className="md:hidden">
+              <Button
+                variant="ghost"
+                size="icon"
+                data-testid="mobile-menu-toggle"
+              >
+                {isOpen ? (
+                  <X className="h-5 w-5" />
+                ) : (
+                  <Menu className="h-5 w-5" />
+                )}
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="right" className="w-[280px] bg-white">
+              <div className="mt-8 flex flex-col gap-2">
+                {navLinks.map((link) => (
+                  <Link
+                    key={link.href}
+                    to={link.href}
+                    onClick={() => setIsOpen(false)}
+                  >
+                    <Button
+                      variant={isActive(link.href) ? "default" : "ghost"}
+                      className={`w-full justify-start gap-3 ${
+                        isActive(link.href)
+                          ? "bg-gradient-to-r from-orange-500 to-red-600 text-white"
+                          : "text-muted-foreground hover:text-foreground hover:bg-orange-50"
+                      }`}
+                      data-testid={`mobile-nav-${link.label.toLowerCase().replace(/\s+/g, "-")}`}
+                    >
+                      <link.icon className="h-5 w-5" />
+                      {link.label}
+                    </Button>
+                  </Link>
+                ))}
+              </div>
+            </SheetContent>
+          </Sheet>
+        </div>
+      </div>
+    </nav>
+  );
+};
+
+export default Navigation;

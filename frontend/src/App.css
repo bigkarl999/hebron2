@@ -1,34 +1,83 @@
-.App-logo {
-    height: 40vmin;
-    pointer-events: none;
+/* Additional App-specific styles */
+.hero-overlay {
+    background: linear-gradient(to bottom, rgba(255,245,235,0.95), rgba(255,255,255,1));
 }
 
-@media (prefers-reduced-motion: no-preference) {
-    .App-logo {
-        animation: App-logo-spin infinite 20s linear;
+.slot-available {
+    @apply bg-gradient-to-br from-green-50 to-emerald-50 border-green-200 cursor-pointer hover:shadow-md hover:border-green-300 transition-all;
+}
+
+.slot-booked {
+    @apply bg-gradient-to-br from-orange-50 to-amber-50 border-orange-200;
+}
+
+.calendar-day {
+    @apply p-2 md:p-4 min-h-[100px] border border-orange-100 rounded-lg bg-white;
+}
+
+.calendar-day.disabled {
+    @apply bg-gray-50 opacity-50;
+}
+
+.calendar-day.today {
+    @apply ring-2 ring-orange-400 ring-offset-2;
+}
+
+/* Mobile-first responsive adjustments */
+@media (max-width: 640px) {
+    .calendar-day {
+        min-height: 80px;
+        padding: 0.5rem;
     }
 }
 
-.App-header {
-    background-color: #0f0f10;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    font-size: calc(10px + 2vmin);
-    color: white;
+/* Warm background texture */
+.bg-warm-texture {
+    background-color: hsl(33 30% 97%);
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+    background-blend-mode: soft-light;
 }
 
-.App-link {
-    color: #61dafb;
+/* Sidebar styles for admin */
+.sidebar-link {
+    @apply flex items-center gap-3 px-4 py-3 rounded-lg text-muted-foreground hover:text-foreground hover:bg-orange-50 transition-all;
 }
 
-@keyframes App-logo-spin {
-    from {
-        transform: rotate(0deg);
-    }
-    to {
-        transform: rotate(360deg);
-    }
+.sidebar-link.active {
+    @apply bg-gradient-to-r from-orange-100 to-amber-50 text-orange-600 font-medium;
+}
+
+/* Table styles */
+.data-table {
+    @apply w-full border-collapse;
+}
+
+.data-table th {
+    @apply text-left p-3 bg-orange-50 text-muted-foreground font-medium text-sm border-b border-orange-100;
+}
+
+.data-table td {
+    @apply p-3 border-b border-orange-50;
+}
+
+.data-table tr:hover td {
+    @apply bg-orange-50/50;
+}
+
+/* Status badges */
+.status-booked {
+    @apply bg-green-100 text-green-700 px-2 py-1 rounded-full text-xs font-medium;
+}
+
+.status-cancelled {
+    @apply bg-red-100 text-red-700 px-2 py-1 rounded-full text-xs font-medium;
+}
+
+/* Role badges */
+.role-prayer {
+    @apply bg-blue-100 text-blue-700 px-2 py-1 rounded-full text-xs font-medium;
+}
+
+.role-worship {
+    @apply bg-purple-100 text-purple-700 px-2 py-1 rounded-full text-xs font-medium;
 }
