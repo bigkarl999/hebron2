@@ -2,9 +2,10 @@ import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import { Menu, X, Calendar, BookOpen, Shield, Flame, Video } from "lucide-react";
+import { Menu, X, Calendar, BookOpen, Shield, Video } from "lucide-react";
 
 const ZOOM_LINK = "https://us02web.zoom.us/j/9033071964";
+const LOGO_URL = "https://customer-assets.emergentagent.com/job_hebron-schedule/artifacts/o14uwphq_hpalogo.png";
 
 export const Navigation = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -28,12 +29,11 @@ export const Navigation = () => {
             className="flex items-center gap-2 font-semibold"
             data-testid="nav-logo"
           >
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-orange-500 to-red-600">
-              <Flame className="h-5 w-5 text-white" />
-            </div>
-            <span className="hidden font-['Playfair_Display'] text-lg text-foreground sm:inline-block">
-              Hebron PA UK
-            </span>
+            <img 
+              src={LOGO_URL} 
+              alt="Hebron PA UK" 
+              className="h-12 w-auto"
+            />
           </Link>
 
           {/* Desktop Navigation */}
