@@ -130,7 +130,7 @@ def send_confirmation_email(booking: dict):
     
     try:
         msg = MIMEMultipart('alternative')
-        msg['Subject'] = f"Booking Confirmed - Hebron Pentecostal Assembly"
+        msg['Subject'] = "Booking Confirmed - Hebron Pentecostal Assembly"
         msg['From'] = GMAIL_ADDRESS
         msg['To'] = booking['email']
         
