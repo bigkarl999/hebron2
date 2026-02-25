@@ -174,6 +174,78 @@ def send_confirmation_email(booking: dict):
     except Exception as e:
         logger.error(f"Failed to send email: {e}")
 
+def send_reminder_email(booking: dict):
+    """Send reminder email 4 hours before meeting"""
+    if not booking.get('email') or not GMAIL_ADDRESS or not GMAIL_APP_PASSWORD:
+        return
+    
+    try:
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = "Reminder: Your slot is in 4 hours - Hebron Pentecostal Assembly"
+        msg['From'] = GMAIL_ADDRESS
+        msg['To'] = booking['email']
+        
+        html = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; padding: 20px; background-color: #fff5eb;">
+            <div style="max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                <h1 style="color: #ea580c; margin-bottom: 20px;">Reminder: Meeting in 4 Hours!</h1>
+                <p>Dear {booking['full_name']},</p>
+                <p>This is a friendly reminder that you are scheduled to serve in today's online meeting.</p>
+                <div style="background: #fff7ed; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                    <p><strong>Role:</strong> Lead {booking['role']}</p>
+                    <p><strong>Date:</strong> Today ({booking['date']})</p>
+                    <p><strong>Time:</strong> 8:00 PM - 9:00 PM (UK Time)</p>
+                </div>
+                <p style="color: #ea580c; font-weight: bold;">Please be ready to join 5-10 minutes early.</p>
+                <p>Thank you for serving at Hebron Pentecostal Assembly UK.</p>
+                <p style="color: #666; font-size: 12px; margin-top: 30px;">
+                    If you cannot attend, please contact the admin as soon as possible.
+                </p>
+            </div>
+        </body>
+        </html>
+        """
+        
+        msg.attach(MIMEText(html, 'html'))
+        
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
+            server.sendmail(GMAIL_ADDRESS, booking['email'], msg.as_string())
+        
+        logger.info(f"Reminder email sent to {booking['email']}")
+    except Exception as e:
+        logger.error(f"Failed to send reminder email: {e}")
+
+async def send_daily_reminders():
+    """Send reminder emails to all participants scheduled for today at 4 PM UK time"""
+    try:
+        # Get today's date in UK timezone
+        uk_now = datetime.now(UK_TZ)
+        today_str = uk_now.strftime("%Y-%m-%d")
+        
+        logger.info(f"Running reminder job for {today_str}")
+        
+        # Find all bookings for today with email addresses
+        bookings = await db.bookings.find({
+            "date": today_str,
+            "status": "Booked",
+            "email": {"$ne": None, "$exists": True}
+        }, {"_id": 0}).to_list(100)
+        
+        logger.info(f"Found {len(bookings)} bookings with emails for today")
+        
+        # Send reminders
+        for booking in bookings:
+            if booking.get('email'):
+                # Run in thread pool to avoid blocking
+                await asyncio.to_thread(send_reminder_email, booking)
+                await asyncio.sleep(1)  # Small delay between emails
+        
+        logger.info(f"Completed sending {len(bookings)} reminder emails")
+    except Exception as e:
+        logger.error(f"Error in send_daily_reminders: {e}")
+
 async def verify_admin_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
     """Verify JWT token for admin routes"""
     if not credentials:
