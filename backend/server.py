@@ -197,14 +197,20 @@ def send_reminder_email(booking: dict):
             <div style="max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
                 <h1 style="color: #ea580c; margin-bottom: 20px;">Reminder: Meeting in 4 Hours!</h1>
                 <p>Dear {booking['full_name']},</p>
-                <p>This is a friendly reminder that you are scheduled to serve in today's online meeting.</p>
+                <p>This is a friendly reminder that you are scheduled to participate in today's online meeting.</p>
                 <div style="background: #fff7ed; padding: 20px; border-radius: 8px; margin: 20px 0;">
                     <p><strong>Role:</strong> Lead {booking['role']}</p>
                     <p><strong>Date:</strong> Today ({booking['date']})</p>
                     <p><strong>Time:</strong> 8:00 PM - 9:00 PM (UK Time)</p>
                 </div>
                 <p style="color: #ea580c; font-weight: bold;">Please be ready to join 5-10 minutes early.</p>
-                <p>Thank you for serving at Hebron Pentecostal Assembly UK.</p>
+                <p>Thank you for your participation.</p>
+                <div style="text-align: center; margin: 25px 0;">
+                    <a href="https://us02web.zoom.us/j/9033071964" 
+                       style="display: inline-block; background: #2563eb; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: bold;">
+                        Join Zoom Meeting
+                    </a>
+                </div>
                 <p style="color: #666; font-size: 12px; margin-top: 30px;">
                     If you cannot attend, please contact the admin as soon as possible.
                 </p>
