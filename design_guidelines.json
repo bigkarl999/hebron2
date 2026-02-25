@@ -1,0 +1,144 @@
+{
+  "brand_identity": {
+    "name": "Hebron Pentecostal Assembly UK",
+    "theme_concept": "The Living Flame",
+    "emotional_tone": "Warm, Sacred, Energetic, Communal",
+    "mode": "light",
+    "primary_audience": "Church Members (Mobile First) & Administrators"
+  },
+  "typography": {
+    "headings": {
+      "font_family": "Playfair Display, serif",
+      "weights": ["600", "700"],
+      "usage": "All section headers, hero titles, modal titles. Use tracking-tight for sizes above 3xl.",
+      "import_link": "https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700;800&family=Inter:wght@300;400;500;600&display=swap"
+    },
+    "body": {
+      "font_family": "Inter, sans-serif",
+      "weights": ["400", "500"],
+      "usage": "Paragraphs, UI labels, form inputs, button text."
+    }
+  },
+  "colors": {
+    "palette": {
+      "primary": {
+        "main": "hsl(18, 90%, 55%)",
+        "hover": "hsl(18, 90%, 45%)",
+        "foreground": "hsl(0, 0%, 100%)",
+        "description": "Vibrant Orange-Red representing the Holy Spirit/Fire."
+      },
+      "secondary": {
+        "main": "hsl(350, 80%, 45%)",
+        "foreground": "hsl(0, 0%, 100%)",
+        "description": "Deep Crimson for solemnity and passion."
+      },
+      "background": {
+        "default": "hsl(33, 30%, 97%)",
+        "paper": "hsl(0, 0%, 100%)",
+        "description": "Warm Sand/Cream base, avoiding clinical white."
+      },
+      "text": {
+        "primary": "hsl(20, 15%, 20%)",
+        "secondary": "hsl(20, 10%, 45%)",
+        "description": "Charcoal with brown undertones for warmth."
+      },
+      "accent": {
+        "yellow": "hsl(45, 95%, 55%)",
+        "success": "hsl(142, 70%, 45%)",
+        "description": "Goldenrod for highlights/glory."
+      }
+    },
+    "gradients": {
+      "hero_overlay": "linear-gradient(to bottom, rgba(255,245,235,0.9), rgba(255,255,255,1))",
+      "primary_action": "linear-gradient(135deg, hsl(18, 90%, 55%) 0%, hsl(350, 80%, 45%) 100%)"
+    }
+  },
+  "spacing_and_layout": {
+    "grid_system": "Bento Grid (Mode A) for Landing/Features, High Density (Mode B) for Dashboard.",
+    "container_padding": "px-4 md:px-8 lg:px-12",
+    "section_spacing": "py-16 md:py-24",
+    "border_radius": "rounded-xl",
+    "mobile_first": true
+  },
+  "components": {
+    "button": {
+      "style": "pill-shaped",
+      "classes": "rounded-full font-medium shadow-md transition-all hover:scale-105 active:scale-95",
+      "variants": {
+        "primary": "bg-gradient-to-r from-orange-500 to-red-600 text-white hover:shadow-lg hover:shadow-orange-500/30 border-0",
+        "secondary": "bg-white text-orange-600 border-2 border-orange-100 hover:border-orange-200 hover:bg-orange-50"
+      }
+    },
+    "card": {
+      "style": "warm-elevation",
+      "classes": "bg-white border-none shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] hover:shadow-[0_8px_30px_-6px_rgba(234,88,12,0.15)] transition-all duration-300"
+    },
+    "input": {
+      "style": "soft-focus",
+      "classes": "border-orange-100 focus:ring-2 focus:ring-orange-200 focus:border-orange-400 bg-orange-50/30"
+    }
+  },
+  "visual_enhancers": {
+    "shadows": "Warm, diffuse shadows (orange-tinted) instead of pure black/gray shadows.",
+    "textures": "Subtle noise overlay on the 'Warm Sand' background to give it paper-like texture.",
+    "icons": "Use 'Lucide React'. Stroke width 2px. Color: Primary Orange or Charcoal.",
+    "animations": {
+      "hover": "gentle lift (-2px)",
+      "entrance": "fade-in-up (staggered)",
+      "transition": "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)"
+    }
+  },
+  "image_urls": {
+    "hero_section": {
+      "url": "https://images.unsplash.com/photo-1763355873972-7c8d76b060ea?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2OTF8MHwxfHNlYXJjaHwyfHxkaXZlcnNlJTIwY2h1cmNoJTIwY29tbXVuaXR5JTIwd29yc2hpcCUyMGhhbmRzfGVufDB8fHx8MTc3MTk4MzQ4MHww&ixlib=rb-4.1.0&q=85",
+      "alt": "Community worship with raised hands",
+      "usage": "Hero background with overlay or main visual."
+    },
+    "prayer_card": {
+      "url": "https://images.unsplash.com/photo-1554355605-2db10cc28456?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzN8MHwxfHNlYXJjaHw0fHxjaHVyY2glMjB3b3JzaGlwJTIwcHJheWVyJTIwbW9kZXJufGVufDB8fHx8MTc3MTk4MzQ3MHww&ixlib=rb-4.1.0&q=85",
+      "alt": "Woman holding Holy Bible",
+      "usage": "Cover image for 'Lead Prayer' booking slot."
+    },
+    "worship_card": {
+      "url": "https://images.unsplash.com/photo-1640127249382-831d11a3cf9f?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzN8MHwxfHNlYXJjaHwyfHxjaHVyY2glMjB3b3JzaGlwJTIwcHJheWVyJTIwbW9kZXJufGVufDB8fHx8MTc3MTk4MzQ3MHww&ixlib=rb-4.1.0&q=85",
+      "alt": "Church interior with chandelier",
+      "usage": "Cover image for 'Lead Worship' booking slot (Alternative)."
+    },
+    "community_section": {
+      "url": "https://images.unsplash.com/photo-1767353461394-7dce69402122?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2OTF8MHwxfHNlYXJjaHw0fHxkaXZlcnNlJTIwY2h1cmNoJTIwY29tbXVuaXR5JTIwd29yc2hpcCUyMGhhbmRzfGVufDB8fHx8MTc3MTk4MzQ4MHww&ixlib=rb-4.1.0&q=85",
+      "alt": "Crowd excitement and joy",
+      "usage": "Footer or Community call-to-action section."
+    }
+  },
+  "layout_structure": {
+    "landing_page": {
+      "hero": "Full height with warm gradient overlay. Center aligned text 'Join the Circle of Prayer'.",
+      "features": "3-column grid (Prayer, Worship, Community).",
+      "booking_preview": "Horizontal strip showing next available slot."
+    },
+    "booking_flow": {
+      "style": "Step-by-step wizard (Role -> Date -> Details -> Confirm).",
+      "layout": "Centered card on mobile, Split view on desktop (Form Left, Inspirational Quote/Image Right)."
+    },
+    "dashboard": {
+      "style": "Sidebar navigation (Collapsible).",
+      "content": "White cards on warm gray background. High density data tables for bookings."
+    }
+  },
+  "universal_guidelines": {
+    "accessibility": "Ensure text contrast ratio of 4.5:1. Use APCA calculator. Focus states must be visible (Orange Ring).",
+    "responsiveness": "Mobile-first. Touch targets minimum 44px. No hover-dependent interactions on mobile.",
+    "motion": "Use `framer-motion` for page transitions. Staggered list items.",
+    "data_testid": "All interactive elements must have data-testid (e.g., 'booking-submit-btn').",
+    "theme_toggle": "Include light/dark toggle, but default to Light (Warm)."
+  },
+  "instructions_to_main_agent": [
+    "Install `framer-motion`, `lucide-react`, `date-fns`.",
+    "Configure `tailwind.config.js` with the specific HSL color values provided.",
+    "Use `Playfair Display` for all headings. Import via Google Fonts in `index.css`.",
+    "Create a reusable `BookingCard` component that takes an image prop.",
+    "For the Admin Dashboard, use a persistent Sidebar Layout.",
+    "Ensure the Booking Form validates: Mon-Thu only, 8PM-9PM slot fixed.",
+    "Use 'sonner' for success/error toasts (e.g., 'Slot Booked Successfully!')."
+  ]
+}
