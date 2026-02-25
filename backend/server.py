@@ -813,6 +813,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ============== SCHEDULER SETUP ==============
+
+@app.on_event("startup")
+async def startup_scheduler():
+    """Start the reminder scheduler on app startup"""
+    # Schedule daily reminder at 4:00 PM UK time (4 hours before 8 PM meeting)
+    scheduler.add_job(
+        send_daily_reminders,
+        CronTrigger(hour=16, minute=0, timezone=UK_TZ),
+        id="daily_reminder",
+        replace_existing=True
+    )
+    scheduler.start()
+    logger.info("Reminder scheduler started - will run daily at 4:00 PM UK time")
+
 @app.on_event("shutdown")
 async def shutdown_db_client():
+    scheduler.shutdown(wait=False)
     client.close()
+    logger.info("Scheduler and database connection closed")
+
+# Admin endpoint to manually trigger reminders (for testing)
+@api_router.post("/admin/send-reminders")
+async def trigger_reminders(admin: dict = Depends(verify_admin_token)):
+    """Manually trigger reminder emails for today's bookings (admin only)"""
+    await send_daily_reminders()
+    return {"message": "Reminder emails sent for today's bookings"}
