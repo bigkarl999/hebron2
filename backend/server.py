@@ -155,7 +155,13 @@ def send_confirmation_email(booking: dict):
                     <p><strong>Date:</strong> {booking['date']}</p>
                     <p><strong>Time:</strong> 8:00 PM - 9:00 PM (UK Time)</p>
                 </div>
-                <p>Thank you for serving at Hebron Pentecostal Assembly UK.</p>
+                <p>Thank you for your participation.</p>
+                <div style="text-align: center; margin: 25px 0;">
+                    <a href="https://us02web.zoom.us/j/9033071964" 
+                       style="display: inline-block; background: #2563eb; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: bold;">
+                        Join Zoom Meeting
+                    </a>
+                </div>
                 <p style="color: #666; font-size: 12px; margin-top: 30px;">
                     If you need to make changes, please contact the admin.
                 </p>
