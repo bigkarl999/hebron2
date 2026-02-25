@@ -38,6 +38,12 @@ JWT_ALGORITHM = "HS256"
 GMAIL_ADDRESS = os.environ.get('GMAIL_ADDRESS', '')
 GMAIL_APP_PASSWORD = os.environ.get('GMAIL_APP_PASSWORD', '')
 
+# UK Timezone
+UK_TZ = pytz.timezone('Europe/London')
+
+# Scheduler for reminder emails
+scheduler = AsyncIOScheduler(timezone=UK_TZ)
+
 # Create the main app
 app = FastAPI(title="Hebron Pentecostal Assembly - Scheduling API")
 
