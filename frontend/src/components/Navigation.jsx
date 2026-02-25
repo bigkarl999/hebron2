@@ -2,7 +2,9 @@ import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import { Menu, X, Calendar, BookOpen, Shield, Flame } from "lucide-react";
+import { Menu, X, Calendar, BookOpen, Shield, Flame, Video } from "lucide-react";
+
+const ZOOM_LINK = "https://us02web.zoom.us/j/9033071964";
 
 export const Navigation = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -52,6 +54,16 @@ export const Navigation = () => {
                 </Button>
               </Link>
             ))}
+            {/* Join Zoom Button */}
+            <a href={ZOOM_LINK} target="_blank" rel="noopener noreferrer">
+              <Button
+                className="ml-2 gap-2 bg-blue-600 text-white hover:bg-blue-700"
+                data-testid="nav-join-zoom"
+              >
+                <Video className="h-4 w-4" />
+                Join Zoom
+              </Button>
+            </a>
           </div>
 
           {/* Mobile Navigation */}
@@ -91,6 +103,21 @@ export const Navigation = () => {
                     </Button>
                   </Link>
                 ))}
+                {/* Mobile Join Zoom Button */}
+                <a
+                  href={ZOOM_LINK}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setIsOpen(false)}
+                >
+                  <Button
+                    className="w-full justify-start gap-3 bg-blue-600 text-white hover:bg-blue-700"
+                    data-testid="mobile-nav-join-zoom"
+                  >
+                    <Video className="h-5 w-5" />
+                    Join Zoom
+                  </Button>
+                </a>
               </div>
             </SheetContent>
           </Sheet>
