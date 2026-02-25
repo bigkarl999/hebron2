@@ -5,11 +5,12 @@ import {
   BarChart3,
   FileText,
   LogOut,
-  Flame,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
 import { useState } from "react";
+
+const LOGO_URL = "https://customer-assets.emergentagent.com/job_hebron-schedule/artifacts/o14uwphq_hpalogo.png";
 
 export const AdminSidebar = () => {
   const location = useLocation();
@@ -40,9 +41,7 @@ export const AdminSidebar = () => {
         <div className="flex h-16 items-center justify-between border-b border-orange-100 px-4">
           {!collapsed && (
             <Link to="/" className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-orange-500 to-red-600">
-                <Flame className="h-4 w-4 text-white" />
-              </div>
+              <img src={LOGO_URL} alt="Logo" className="h-10 w-auto" />
               <span className="font-['Playfair_Display'] font-semibold">
                 Admin
               </span>
