@@ -219,15 +219,6 @@ const HomePage = () => {
           </motion.div>
         </div>
       </section>
-
-      {/* Footer */}
-      <footer className="border-t border-orange-100 bg-white py-8">
-        <div className="container mx-auto px-4 text-center">
-          <p className="text-muted-foreground">
-            &copy; {new Date().getFullYear()} Hebron Pentecostal Assembly UK. All rights reserved.
-          </p>
-        </div>
-      </footer>
     </div>
   );
 };
