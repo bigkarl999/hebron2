@@ -802,6 +802,13 @@ async def export_bookings_excel(
         headers={"Content-Disposition": f"attachment; filename=bookings_{datetime.now().strftime('%Y%m%d')}.xlsx"}
     )
 
+# Admin endpoint to manually trigger reminders (for testing)
+@api_router.post("/admin/send-reminders")
+async def trigger_reminders(admin: dict = Depends(verify_admin_token)):
+    """Manually trigger reminder emails for today's bookings (admin only)"""
+    await send_daily_reminders()
+    return {"message": "Reminder emails sent for today's bookings"}
+
 # Include the router in the main app
 app.include_router(api_router)
 
