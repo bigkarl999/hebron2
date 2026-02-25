@@ -840,10 +840,3 @@ async def shutdown_db_client():
     scheduler.shutdown(wait=False)
     client.close()
     logger.info("Scheduler and database connection closed")
-
-# Admin endpoint to manually trigger reminders (for testing)
-@api_router.post("/admin/send-reminders")
-async def trigger_reminders(admin: dict = Depends(verify_admin_token)):
-    """Manually trigger reminder emails for today's bookings (admin only)"""
-    await send_daily_reminders()
-    return {"message": "Reminder emails sent for today's bookings"}
