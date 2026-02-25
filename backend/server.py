@@ -11,9 +11,6 @@ from typing import List, Optional
 import uuid
 from datetime import datetime, timezone, timedelta
 import jwt
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 import io
 import xlsxwriter
 from fastapi.responses import StreamingResponse
@@ -21,6 +18,11 @@ import asyncio
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
+
+# Resend (HTTP)
+import json
+import urllib.request
+import urllib.error
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -34,9 +36,12 @@ db = client[os.environ['DB_NAME']]
 JWT_SECRET = os.environ.get('JWT_SECRET', 'hebron-secret-key-2024')
 JWT_ALGORITHM = "HS256"
 
-# Gmail SMTP Settings
-GMAIL_ADDRESS = os.environ.get('GMAIL_ADDRESS', '')
-GMAIL_APP_PASSWORD = os.environ.get('GMAIL_APP_PASSWORD', '')
+# Resend Email Settings
+RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
+RESEND_FROM = os.environ.get(
+    'RESEND_FROM',
+    'Hebron Schedule <noreply@upperroom.hebronpentecostalassembly.org>'
+)
 
 # UK Timezone
 UK_TZ = pytz.timezone('Europe/London')
@@ -117,32 +122,64 @@ def validate_booking_date(date_str: str) -> bool:
         date_obj = datetime.strptime(date_str, "%Y-%m-%d")
         today = datetime.now()
         one_month_later = today + timedelta(days=31)
-        
+
         # Check if day is Monday (0) to Thursday (3)
         if date_obj.weekday() > 3:
             return False
-        
+
         # Check if date is in the future but within 1 month
         if date_obj.date() < today.date():
             return False
         if date_obj.date() > one_month_later.date():
             return False
-            
+
         return True
     except ValueError:
         return False
 
-def send_confirmation_email(booking: dict):
-    """Send email confirmation via Gmail SMTP"""
-    if not booking.get('email') or not GMAIL_ADDRESS or not GMAIL_APP_PASSWORD:
+def _send_email_resend(to_email: str, subject: str, html: str):
+    """
+    Send an email via Resend (HTTPS).
+    Uses RESEND_API_KEY and RESEND_FROM from env vars.
+    """
+    if not RESEND_API_KEY or not to_email:
         return
-    
+
+    payload = {
+        "from": RESEND_FROM,
+        "to": [to_email],
+        "subject": subject,
+        "html": html
+    }
+
+    req = urllib.request.Request(
+        url="https://api.resend.com/emails",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type": "application/json"
+        },
+        method="POST"
+    )
+
     try:
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = "Booking Confirmed - Hebron Pentecostal Assembly"
-        msg['From'] = GMAIL_ADDRESS
-        msg['To'] = booking['email']
-        
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            if resp.status >= 400:
+                raise Exception(f"Resend error {resp.status}: {body}")
+            logger.info(f"Resend email sent to {to_email} (status={resp.status})")
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode("utf-8", errors="replace") if hasattr(e, "read") else str(e)
+        logger.error(f"Failed to send email via Resend (HTTPError): {e.code} {err_body}")
+    except Exception as e:
+        logger.error(f"Failed to send email via Resend: {e}")
+
+def send_confirmation_email(booking: dict):
+    """Send email confirmation via Resend"""
+    if not booking.get('email') or not RESEND_API_KEY:
+        return
+
+    try:
         html = f"""
         <html>
         <body style="font-family: Arial, sans-serif; padding: 20px; background-color: #fff5eb;">
@@ -169,28 +206,19 @@ def send_confirmation_email(booking: dict):
         </body>
         </html>
         """
-        
-        msg.attach(MIMEText(html, 'html'))
-        
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-            server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
-            server.sendmail(GMAIL_ADDRESS, booking['email'], msg.as_string())
-        
-        logger.info(f"Email sent to {booking['email']}")
+
+        subject = "Booking Confirmed - Hebron Pentecostal Assembly"
+        _send_email_resend(booking['email'], subject, html)
+
     except Exception as e:
         logger.error(f"Failed to send email: {e}")
 
 def send_reminder_email(booking: dict):
     """Send reminder email 4 hours before meeting"""
-    if not booking.get('email') or not GMAIL_ADDRESS or not GMAIL_APP_PASSWORD:
+    if not booking.get('email') or not RESEND_API_KEY:
         return
-    
+
     try:
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = "Reminder: Your slot is in 4 hours - Hebron Pentecostal Assembly"
-        msg['From'] = GMAIL_ADDRESS
-        msg['To'] = booking['email']
-        
         html = f"""
         <html>
         <body style="font-family: Arial, sans-serif; padding: 20px; background-color: #fff5eb;">
@@ -218,14 +246,10 @@ def send_reminder_email(booking: dict):
         </body>
         </html>
         """
-        
-        msg.attach(MIMEText(html, 'html'))
-        
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-            server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
-            server.sendmail(GMAIL_ADDRESS, booking['email'], msg.as_string())
-        
-        logger.info(f"Reminder email sent to {booking['email']}")
+
+        subject = "Reminder: Your slot is in 4 hours - Hebron Pentecostal Assembly"
+        _send_email_resend(booking['email'], subject, html)
+
     except Exception as e:
         logger.error(f"Failed to send reminder email: {e}")
 
@@ -235,25 +259,25 @@ async def send_daily_reminders():
         # Get today's date in UK timezone
         uk_now = datetime.now(UK_TZ)
         today_str = uk_now.strftime("%Y-%m-%d")
-        
+
         logger.info(f"Running reminder job for {today_str}")
-        
+
         # Find all bookings for today with email addresses
         bookings = await db.bookings.find({
             "date": today_str,
             "status": "Booked",
             "email": {"$ne": None, "$exists": True}
         }, {"_id": 0}).to_list(100)
-        
+
         logger.info(f"Found {len(bookings)} bookings with emails for today")
-        
+
         # Send reminders
         for booking in bookings:
             if booking.get('email'):
                 # Run in thread pool to avoid blocking
                 await asyncio.to_thread(send_reminder_email, booking)
                 await asyncio.sleep(1)  # Small delay between emails
-        
+
         logger.info(f"Completed sending {len(bookings)} reminder emails")
     except Exception as e:
         logger.error(f"Error in send_daily_reminders: {e}")
@@ -262,7 +286,7 @@ async def verify_admin_token(credentials: HTTPAuthorizationCredentials = Depends
     """Verify JWT token for admin routes"""
     if not credentials:
         raise HTTPException(status_code=401, detail="Authentication required")
-    
+
     try:
         payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         if payload.get('role') != 'admin':
@@ -286,46 +310,46 @@ async def health_check():
 @api_router.post("/bookings", response_model=Booking)
 async def create_booking(booking_data: BookingCreate):
     """Create a new booking with slot locking"""
-    
+
     # Validate date
     if not validate_booking_date(booking_data.date):
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail="Invalid date. Please select Monday-Thursday within the next month."
         )
-    
+
     # Check if slot is already taken (atomic operation)
     existing = await db.bookings.find_one({
         "date": booking_data.date,
         "role": booking_data.role,
         "status": "Booked"
     }, {"_id": 0})
-    
+
     if existing:
         raise HTTPException(
-            status_code=409, 
+            status_code=409,
             detail="This slot is already taken. Please choose another date."
         )
-    
+
     # Check if user already has a booking on this date
     user_booking = await db.bookings.find_one({
         "date": booking_data.date,
         "full_name": {"$regex": f"^{booking_data.full_name}$", "$options": "i"},
         "status": "Booked"
     }, {"_id": 0})
-    
+
     if user_booking:
         raise HTTPException(
             status_code=409,
             detail="You already have a booking on this date. Please choose another date."
         )
-    
+
     # Create booking
     booking = Booking(**booking_data.model_dump())
     doc = booking.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
     doc['last_updated_at'] = doc['last_updated_at'].isoformat()
-    
+
     # Use findOneAndUpdate with upsert for atomic slot locking
     result = await db.bookings.update_one(
         {
@@ -336,17 +360,17 @@ async def create_booking(booking_data: BookingCreate):
         {"$setOnInsert": doc},
         upsert=True
     )
-    
+
     if result.matched_count > 0:
         raise HTTPException(
-            status_code=409, 
+            status_code=409,
             detail="This slot is already taken. Please choose another date."
         )
-    
+
     # Send email confirmation in background
     if booking_data.email:
         asyncio.create_task(asyncio.to_thread(send_confirmation_email, doc))
-    
+
     return booking
 
 @api_router.get("/bookings/availability")
@@ -360,13 +384,13 @@ async def get_availability(
         end = datetime.strptime(end_date, "%Y-%m-%d")
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date format")
-    
+
     # Get all bookings in range
     bookings = await db.bookings.find({
         "date": {"$gte": start_date, "$lte": end_date},
         "status": "Booked"
     }, {"_id": 0}).to_list(1000)
-    
+
     # Build availability map
     availability = {}
     current = start
@@ -381,7 +405,7 @@ async def get_availability(
                 "worship_booked_by": None
             }
         current += timedelta(days=1)
-    
+
     # Mark booked slots
     for booking in bookings:
         date_str = booking['date']
@@ -392,7 +416,7 @@ async def get_availability(
             elif booking['role'] == 'Worship':
                 availability[date_str]['worship_available'] = False
                 availability[date_str]['worship_booked_by'] = format_name_display(booking['full_name'])
-    
+
     return list(availability.values())
 
 @api_router.get("/bookings/public")
@@ -402,7 +426,7 @@ async def get_public_bookings():
         {"status": "Booked"},
         {"_id": 0, "email": 0, "notes": 0}
     ).to_list(1000)
-    
+
     # Format names for privacy
     for booking in bookings:
         booking['display_name'] = format_name_display(booking['full_name'])
@@ -410,7 +434,7 @@ async def get_public_bookings():
             booking['created_at'] = datetime.fromisoformat(booking['created_at'])
         if isinstance(booking.get('last_updated_at'), str):
             booking['last_updated_at'] = datetime.fromisoformat(booking['last_updated_at'])
-    
+
     return bookings
 
 # ============== ADMIN ROUTES ==============
@@ -425,7 +449,7 @@ async def admin_login(credentials: AdminLogin):
             "exp": datetime.now(timezone.utc) + timedelta(hours=24)
         }, JWT_SECRET, algorithm=JWT_ALGORITHM)
         return {"token": token, "username": credentials.username}
-    
+
     raise HTTPException(status_code=401, detail="Invalid credentials")
 
 @api_router.get("/admin/bookings", response_model=List[Booking])
@@ -438,7 +462,7 @@ async def get_admin_bookings(
 ):
     """Get all bookings with filters (admin only)"""
     query = {}
-    
+
     if date_filter:
         query["date"] = date_filter
     if role_filter:
@@ -447,15 +471,15 @@ async def get_admin_bookings(
         query["full_name"] = {"$regex": name_filter, "$options": "i"}
     if status_filter:
         query["status"] = status_filter
-    
+
     bookings = await db.bookings.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
-    
+
     for booking in bookings:
         if isinstance(booking.get('created_at'), str):
             booking['created_at'] = datetime.fromisoformat(booking['created_at'])
         if isinstance(booking.get('last_updated_at'), str):
             booking['last_updated_at'] = datetime.fromisoformat(booking['last_updated_at'])
-    
+
     return bookings
 
 @api_router.put("/admin/bookings/{booking_id}")
@@ -466,43 +490,43 @@ async def update_booking(
 ):
     """Update a booking (admin only)"""
     update_dict = {k: v for k, v in update_data.model_dump().items() if v is not None}
-    
+
     if not update_dict:
         raise HTTPException(status_code=400, detail="No fields to update")
-    
+
     # If changing date or role, check for conflicts
     if 'date' in update_dict or 'role' in update_dict:
         existing = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
         if not existing:
             raise HTTPException(status_code=404, detail="Booking not found")
-        
+
         check_date = update_dict.get('date', existing['date'])
         check_role = update_dict.get('role', existing['role'])
-        
+
         conflict = await db.bookings.find_one({
             "date": check_date,
             "role": check_role,
             "status": "Booked",
             "id": {"$ne": booking_id}
         }, {"_id": 0})
-        
+
         if conflict:
             raise HTTPException(
                 status_code=409,
                 detail="This slot is already taken by another booking."
             )
-    
+
     update_dict['edited_by_admin'] = True
     update_dict['last_updated_at'] = datetime.now(timezone.utc).isoformat()
-    
+
     result = await db.bookings.update_one(
         {"id": booking_id},
         {"$set": update_dict}
     )
-    
+
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Booking not found")
-    
+
     updated = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
     return updated
 
@@ -513,10 +537,10 @@ async def delete_booking(
 ):
     """Delete a booking (admin only)"""
     result = await db.bookings.delete_one({"id": booking_id})
-    
+
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Booking not found")
-    
+
     return {"message": "Booking deleted successfully"}
 
 @api_router.post("/admin/bookings/{booking_id}/unlock")
@@ -535,10 +559,10 @@ async def unlock_slot(
             }
         }
     )
-    
+
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Booking not found")
-    
+
     return {"message": "Slot unlocked successfully"}
 
 # ============== ANALYTICS ROUTES ==============
@@ -553,14 +577,14 @@ async def get_analytics(
     now = datetime.now()
     target_month = month or now.month
     target_year = year or now.year
-    
+
     # Calculate date range for the month
     start_date = f"{target_year}-{target_month:02d}-01"
     if target_month == 12:
         end_date = f"{target_year + 1}-01-01"
     else:
         end_date = f"{target_year}-{target_month + 1:02d}-01"
-    
+
     # Get bookings for the month
     pipeline = [
         {
@@ -576,9 +600,9 @@ async def get_analytics(
             }
         }
     ]
-    
+
     role_stats = await db.bookings.aggregate(pipeline).to_list(100)
-    
+
     # Get participant stats
     participant_pipeline = [
         {
@@ -601,13 +625,13 @@ async def get_analytics(
         },
         {"$sort": {"total_bookings": -1}}
     ]
-    
+
     participants = await db.bookings.aggregate(participant_pipeline).to_list(100)
-    
+
     # Calculate totals
     prayer_total = next((s['count'] for s in role_stats if s['_id'] == 'Prayer'), 0)
     worship_total = next((s['count'] for s in role_stats if s['_id'] == 'Worship'), 0)
-    
+
     return {
         "month": target_month,
         "year": target_year,
@@ -638,11 +662,11 @@ async def get_participant_history(
         },
         {"_id": 0}
     ).sort("date", -1).to_list(1000)
-    
+
     # Calculate stats
     prayer_count = sum(1 for b in bookings if b['role'] == 'Prayer')
     worship_count = sum(1 for b in bookings if b['role'] == 'Worship')
-    
+
     return {
         "name": name,
         "total_services": len(bookings),
@@ -665,13 +689,13 @@ async def get_monthly_report(
         end_date = f"{year + 1}-01-01"
     else:
         end_date = f"{year}-{month + 1:02d}-01"
-    
+
     # Get all bookings for the month
     bookings = await db.bookings.find({
         "date": {"$gte": start_date, "$lt": end_date},
         "status": "Booked"
     }, {"_id": 0}).to_list(1000)
-    
+
     # Calculate available slots (Mon-Thu in month)
     start = datetime.strptime(start_date, "%Y-%m-%d")
     end = datetime.strptime(end_date, "%Y-%m-%d")
@@ -681,42 +705,42 @@ async def get_monthly_report(
         if current.weekday() <= 3:
             available_days += 1
         current += timedelta(days=1)
-    
+
     total_available_slots = available_days * 2  # Prayer + Worship
-    
+
     # Count by role
     prayer_count = sum(1 for b in bookings if b['role'] == 'Prayer')
     worship_count = sum(1 for b in bookings if b['role'] == 'Worship')
-    
+
     # Participation rate
     participation_rate = (len(bookings) / total_available_slots * 100) if total_available_slots > 0 else 0
-    
+
     # Top participants
     participant_counts = {}
     for b in bookings:
         name = b['full_name']
         participant_counts[name] = participant_counts.get(name, 0) + 1
-    
+
     top_participants = sorted(
         [{"name": k, "count": v} for k, v in participant_counts.items()],
         key=lambda x: x['count'],
         reverse=True
     )[:10]
-    
+
     # Find inactive members (served in previous months but not this month)
     prev_month = month - 1 if month > 1 else 12
     prev_year = year if month > 1 else year - 1
     prev_start = f"{prev_year}-{prev_month:02d}-01"
-    
+
     prev_bookings = await db.bookings.find({
         "date": {"$gte": prev_start, "$lt": start_date},
         "status": "Booked"
     }, {"_id": 0}).to_list(1000)
-    
+
     prev_participants = set(b['full_name'] for b in prev_bookings)
     current_participants = set(b['full_name'] for b in bookings)
     inactive = list(prev_participants - current_participants)
-    
+
     return {
         "month": month,
         "year": year,
@@ -739,7 +763,7 @@ async def export_bookings_csv(
 ):
     """Export bookings as CSV"""
     query = {"status": "Booked"}
-    
+
     if month and year:
         start_date = f"{year}-{month:02d}-01"
         if month == 12:
@@ -747,18 +771,18 @@ async def export_bookings_csv(
         else:
             end_date = f"{year}-{month + 1:02d}-01"
         query["date"] = {"$gte": start_date, "$lt": end_date}
-    
+
     bookings = await db.bookings.find(query, {"_id": 0}).sort("date", 1).to_list(10000)
-    
+
     # Create CSV
     output = io.StringIO()
     output.write("ID,Full Name,Role,Date,Time,Status,Notes,Created At\n")
-    
+
     for b in bookings:
         output.write(f"{b.get('id','')},{b.get('full_name','')},{b.get('role','')},{b.get('date','')},8:00 PM - 9:00 PM,{b.get('status','')},{b.get('notes','') or ''},{b.get('created_at','')}\n")
-    
+
     output.seek(0)
-    
+
     return Response(
         content=output.getvalue(),
         media_type="text/csv",
@@ -773,7 +797,7 @@ async def export_bookings_excel(
 ):
     """Export bookings as Excel"""
     query = {"status": "Booked"}
-    
+
     if month and year:
         start_date = f"{year}-{month:02d}-01"
         if month == 12:
@@ -781,19 +805,19 @@ async def export_bookings_excel(
         else:
             end_date = f"{year}-{month + 1:02d}-01"
         query["date"] = {"$gte": start_date, "$lt": end_date}
-    
+
     bookings = await db.bookings.find(query, {"_id": 0}).sort("date", 1).to_list(10000)
-    
+
     # Create Excel
     output = io.BytesIO()
     workbook = xlsxwriter.Workbook(output)
     worksheet = workbook.add_worksheet("Bookings")
-    
+
     # Headers
     headers = ["ID", "Full Name", "Role", "Date", "Time", "Status", "Notes", "Created At"]
     for col, header in enumerate(headers):
         worksheet.write(0, col, header)
-    
+
     # Data
     for row, b in enumerate(bookings, start=1):
         worksheet.write(row, 0, b.get('id', ''))
@@ -804,10 +828,10 @@ async def export_bookings_excel(
         worksheet.write(row, 5, b.get('status', ''))
         worksheet.write(row, 6, b.get('notes', '') or '')
         worksheet.write(row, 7, str(b.get('created_at', '')))
-    
+
     workbook.close()
     output.seek(0)
-    
+
     return Response(
         content=output.getvalue(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
