@@ -18,11 +18,7 @@ import asyncio
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
-
-# Resend (HTTP)
-import json
-import urllib.request
-import urllib.error
+import requests
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -36,11 +32,12 @@ db = client[os.environ['DB_NAME']]
 JWT_SECRET = os.environ.get('JWT_SECRET', 'hebron-secret-key-2024')
 JWT_ALGORITHM = "HS256"
 
-# Resend Email Settings
-RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
+# Resend Settings
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+# You can override this via Railway variable RESEND_FROM if you want
 RESEND_FROM = os.environ.get(
-    'RESEND_FROM',
-    'Hebron Schedule <noreply@upperroom.hebronpentecostalassembly.org>'
+    "RESEND_FROM",
+    "Hebron Schedule <noreply@upperroom.hebronpentecostalassembly.org>"
 )
 
 # UK Timezone
@@ -137,121 +134,121 @@ def validate_booking_date(date_str: str) -> bool:
     except ValueError:
         return False
 
-def _send_email_resend(to_email: str, subject: str, html: str):
+def _send_email_via_resend(to_email: str, subject: str, html: str) -> None:
     """
-    Send an email via Resend (HTTPS).
-    Uses RESEND_API_KEY and RESEND_FROM from env vars.
+    Send an email using Resend.
+    This replaces Gmail SMTP completely.
     """
-    if not RESEND_API_KEY or not to_email:
+    if not to_email:
         return
 
-    payload = {
-        "from": RESEND_FROM,
-        "to": [to_email],
-        "subject": subject,
-        "html": html
-    }
-
-    req = urllib.request.Request(
-        url="https://api.resend.com/emails",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {RESEND_API_KEY}",
-            "Content-Type": "application/json"
-        },
-        method="POST"
-    )
+    if not RESEND_API_KEY:
+        logger.error("RESEND_API_KEY is not set. Cannot send email.")
+        return
 
     try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            body = resp.read().decode("utf-8", errors="replace")
-            if resp.status >= 400:
-                raise Exception(f"Resend error {resp.status}: {body}")
-            logger.info(f"Resend email sent to {to_email} (status={resp.status})")
-    except urllib.error.HTTPError as e:
-        err_body = e.read().decode("utf-8", errors="replace") if hasattr(e, "read") else str(e)
-        logger.error(f"Failed to send email via Resend (HTTPError): {e.code} {err_body}")
+        url = "https://api.resend.com/emails"
+        headers = {
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            # This helps avoid some WAF blocks (your 403/1010 symptoms)
+            "User-Agent": "hebron-schedule/1.0 (+https://upperroom.hebronpentecostalassembly.org)"
+        }
+        payload = {
+            "from": RESEND_FROM,
+            "to": [to_email],
+            "subject": subject,
+            "html": html
+        }
+
+        resp = requests.post(url, headers=headers, json=payload, timeout=20)
+
+        # Raise if not 2xx
+        if resp.status_code < 200 or resp.status_code >= 300:
+            body_snippet = (resp.text or "")[:500]
+            logger.error(
+                f"Failed to send email via Resend. "
+                f"Status={resp.status_code}. Body={body_snippet}"
+            )
+            resp.raise_for_status()
+
+        logger.info(f"Email sent via Resend to {to_email}")
+
+    except requests.HTTPError as e:
+        # This is where you were seeing 403 / 1010
+        logger.error(f"Failed to send email via Resend (HTTPError): {e}")
     except Exception as e:
         logger.error(f"Failed to send email via Resend: {e}")
 
 def send_confirmation_email(booking: dict):
-    """Send email confirmation via Resend"""
-    if not booking.get('email') or not RESEND_API_KEY:
+    """Send email confirmation via Resend (same template as before)"""
+    if not booking.get('email'):
         return
 
-    try:
-        html = f"""
-        <html>
-        <body style="font-family: Arial, sans-serif; padding: 20px; background-color: #fff5eb;">
-            <div style="max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-                <h1 style="color: #ea580c; margin-bottom: 20px;">Booking Confirmed!</h1>
-                <p>Dear {booking['full_name']},</p>
-                <p>Your slot has been successfully booked for the online meeting.</p>
-                <div style="background: #fff7ed; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                    <p><strong>Role:</strong> Lead {booking['role']}</p>
-                    <p><strong>Date:</strong> {booking['date']}</p>
-                    <p><strong>Time:</strong> 8:00 PM - 9:00 PM (UK Time)</p>
-                </div>
-                <p>Thank you for your participation.</p>
-                <div style="text-align: center; margin: 25px 0;">
-                    <a href="https://us02web.zoom.us/j/9033071964" 
-                       style="display: inline-block; background: #2563eb; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: bold;">
-                        Join Zoom Meeting
-                    </a>
-                </div>
-                <p style="color: #666; font-size: 12px; margin-top: 30px;">
-                    If you need to make changes, please contact the admin.
-                </p>
+    subject = "Booking Confirmed - Hebron Pentecostal Assembly"
+    html = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; padding: 20px; background-color: #fff5eb;">
+        <div style="max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+            <h1 style="color: #ea580c; margin-bottom: 20px;">Booking Confirmed!</h1>
+            <p>Dear {booking['full_name']},</p>
+            <p>Your slot has been successfully booked for the online meeting.</p>
+            <div style="background: #fff7ed; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                <p><strong>Role:</strong> Lead {booking['role']}</p>
+                <p><strong>Date:</strong> {booking['date']}</p>
+                <p><strong>Time:</strong> 8:00 PM - 9:00 PM (UK Time)</p>
             </div>
-        </body>
-        </html>
-        """
-
-        subject = "Booking Confirmed - Hebron Pentecostal Assembly"
-        _send_email_resend(booking['email'], subject, html)
-
-    except Exception as e:
-        logger.error(f"Failed to send email: {e}")
+            <p>Thank you for your participation.</p>
+            <div style="text-align: center; margin: 25px 0;">
+                <a href="https://us02web.zoom.us/j/9033071964"
+                   style="display: inline-block; background: #2563eb; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: bold;">
+                    Join Zoom Meeting
+                </a>
+            </div>
+            <p style="color: #666; font-size: 12px; margin-top: 30px;">
+                If you need to make changes, please contact the admin.
+            </p>
+        </div>
+    </body>
+    </html>
+    """
+    _send_email_via_resend(booking["email"], subject, html)
 
 def send_reminder_email(booking: dict):
-    """Send reminder email 4 hours before meeting"""
-    if not booking.get('email') or not RESEND_API_KEY:
+    """Send reminder email 4 hours before meeting (same template as before)"""
+    if not booking.get('email'):
         return
 
-    try:
-        html = f"""
-        <html>
-        <body style="font-family: Arial, sans-serif; padding: 20px; background-color: #fff5eb;">
-            <div style="max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-                <h1 style="color: #ea580c; margin-bottom: 20px;">Reminder: Meeting in 4 Hours!</h1>
-                <p>Dear {booking['full_name']},</p>
-                <p>This is a friendly reminder that you are scheduled to participate in today's online meeting.</p>
-                <div style="background: #fff7ed; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                    <p><strong>Role:</strong> Lead {booking['role']}</p>
-                    <p><strong>Date:</strong> Today ({booking['date']})</p>
-                    <p><strong>Time:</strong> 8:00 PM - 9:00 PM (UK Time)</p>
-                </div>
-                <p style="color: #ea580c; font-weight: bold;">Please be ready to join 5-10 minutes early.</p>
-                <p>Thank you for your participation.</p>
-                <div style="text-align: center; margin: 25px 0;">
-                    <a href="https://us02web.zoom.us/j/9033071964" 
-                       style="display: inline-block; background: #2563eb; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: bold;">
-                        Join Zoom Meeting
-                    </a>
-                </div>
-                <p style="color: #666; font-size: 12px; margin-top: 30px;">
-                    If you cannot attend, please contact the admin as soon as possible.
-                </p>
+    subject = "Reminder: Your slot is in 4 hours - Hebron Pentecostal Assembly"
+    html = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; padding: 20px; background-color: #fff5eb;">
+        <div style="max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+            <h1 style="color: #ea580c; margin-bottom: 20px;">Reminder: Meeting in 4 Hours!</h1>
+            <p>Dear {booking['full_name']},</p>
+            <p>This is a friendly reminder that you are scheduled to participate in today's online meeting.</p>
+            <div style="background: #fff7ed; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                <p><strong>Role:</strong> Lead {booking['role']}</p>
+                <p><strong>Date:</strong> Today ({booking['date']})</p>
+                <p><strong>Time:</strong> 8:00 PM - 9:00 PM (UK Time)</p>
             </div>
-        </body>
-        </html>
-        """
-
-        subject = "Reminder: Your slot is in 4 hours - Hebron Pentecostal Assembly"
-        _send_email_resend(booking['email'], subject, html)
-
-    except Exception as e:
-        logger.error(f"Failed to send reminder email: {e}")
+            <p style="color: #ea580c; font-weight: bold;">Please be ready to join 5-10 minutes early.</p>
+            <p>Thank you for your participation.</p>
+            <div style="text-align: center; margin: 25px 0;">
+                <a href="https://us02web.zoom.us/j/9033071964"
+                   style="display: inline-block; background: #2563eb; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: bold;">
+                    Join Zoom Meeting
+                </a>
+            </div>
+            <p style="color: #666; font-size: 12px; margin-top: 30px;">
+                If you cannot attend, please contact the admin as soon as possible.
+            </p>
+        </div>
+    </body>
+    </html>
+    """
+    _send_email_via_resend(booking["email"], subject, html)
 
 async def send_daily_reminders():
     """Send reminder emails to all participants scheduled for today at 4 PM UK time"""
@@ -274,7 +271,6 @@ async def send_daily_reminders():
         # Send reminders
         for booking in bookings:
             if booking.get('email'):
-                # Run in thread pool to avoid blocking
                 await asyncio.to_thread(send_reminder_email, booking)
                 await asyncio.sleep(1)  # Small delay between emails
 
