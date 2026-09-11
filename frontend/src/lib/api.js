@@ -25,7 +25,7 @@ api.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem("adminToken");
-      if (window.location.pathname.startsWith("/admin") && 
+      if (window.location.pathname.startsWith("/admin") &&
           window.location.pathname !== "/admin/login") {
         window.location.href = "/admin/login";
       }
@@ -57,6 +57,7 @@ export const getAdminBookings = (filters = {}) => {
 export const updateBooking = (id, data) => api.put(`/admin/bookings/${id}`, data);
 export const deleteBooking = (id) => api.delete(`/admin/bookings/${id}`);
 export const unlockSlot = (id) => api.post(`/admin/bookings/${id}/unlock`);
+export const sendManualWhatsApp = (data) => api.post("/admin/whatsapp/send-template", data);
 
 // Analytics
 export const getAnalytics = (month, year) =>
