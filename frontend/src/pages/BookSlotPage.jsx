@@ -11,6 +11,7 @@ import Navigation from "@/components/Navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { createBooking, getAvailability } from "@/lib/api";
+import { formatPhoneInput, phoneValidation } from "@/lib/phone";
 import {
   ArrowLeft,
   ArrowRight,
@@ -50,6 +51,8 @@ const BookSlotPage = () => {
     email: "",
     phone_number: "",
   });
+
+  const phoneState = phoneValidation(formData.phone_number);
 
   useEffect(() => {
     const fetchAvailability = async () => {
@@ -106,9 +109,17 @@ const BookSlotPage = () => {
 
   const handleBack = () => setCurrentStep((prev) => Math.max(prev - 1, 1));
 
+  const handlePhoneChange = (value) => {
+    setFormData((current) => ({ ...current, phone_number: formatPhoneInput(value) }));
+  };
+
   const handleSubmit = async () => {
     if (!formData.full_name.trim() || !formData.role || !formData.date) {
       toast.error("Please fill in all required fields");
+      return;
+    }
+    if (!phoneState.valid) {
+      toast.error(phoneState.message);
       return;
     }
 
@@ -194,7 +205,7 @@ const BookSlotPage = () => {
               <div className="mb-3 flex items-start gap-2">
                 <div className="flex h-9 w-9 items-center justify-center rounded-full bg-green-100"><MessageCircle className="h-5 w-5 text-green-700" /></div>
                 <div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <Label htmlFor="phone_number" className="text-base font-semibold">WhatsApp Number</Label>
                     <span className="rounded-full bg-green-600 px-2 py-0.5 text-xs font-semibold text-white">Recommended</span>
                   </div>
@@ -203,8 +214,9 @@ const BookSlotPage = () => {
               </div>
               <div className="relative">
                 <Phone className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-green-700" />
-                <Input id="phone_number" type="tel" inputMode="tel" placeholder="07xxx xxxxxx or +44..." value={formData.phone_number} onChange={(e) => setFormData({ ...formData, phone_number: e.target.value })} className="h-12 border-green-200 bg-white pl-10 text-base focus-visible:ring-green-500" data-testid="input-whatsapp-number" />
+                <Input id="phone_number" type="tel" inputMode="tel" autoComplete="tel" placeholder="07xxx xxxxxx or +44..." value={formData.phone_number} onChange={(e) => handlePhoneChange(e.target.value)} className={`h-12 bg-white pl-10 text-base ${phoneState.valid ? "border-green-200 focus-visible:ring-green-500" : "border-red-300 focus-visible:ring-red-500"}`} data-testid="input-whatsapp-number" />
               </div>
+              {formData.phone_number && <p className={`mt-2 text-xs ${phoneState.valid ? "text-green-700" : "text-red-600"}`}>{phoneState.message}</p>}
               <p className="mt-2 text-xs text-green-800/70">By entering your number, you agree to receive your booking confirmation and reminder on WhatsApp.</p>
             </div>
 
@@ -284,7 +296,7 @@ const BookSlotPage = () => {
                 {currentStep < 4 ? (
                   <Button onClick={handleNext} className="btn-primary gap-2" data-testid="btn-next">Next<ArrowRight className="h-4 w-4" /></Button>
                 ) : (
-                  <Button onClick={handleSubmit} disabled={isSubmitting} className="btn-primary gap-2" data-testid="btn-submit">
+                  <Button onClick={handleSubmit} disabled={isSubmitting || !phoneState.valid} className="btn-primary gap-2" data-testid="btn-submit">
                     {isSubmitting ? <><Loader2 className="h-4 w-4 animate-spin" />Booking...</> : <><Check className="h-4 w-4" />Confirm Booking</>}
                   </Button>
                 )}
