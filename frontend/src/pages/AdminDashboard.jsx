@@ -36,6 +36,7 @@ import {
   unlockSlot,
   exportCSV,
   exportExcel,
+  sendManualWhatsApp,
 } from "@/lib/api";
 import {
   Search,
@@ -50,6 +51,9 @@ import {
   Music,
   RefreshCw,
   FileSpreadsheet,
+  MessageCircle,
+  Send,
+  Phone,
 } from "lucide-react";
 import { format } from "date-fns";
 
@@ -66,6 +70,16 @@ const AdminDashboard = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [editData, setEditData] = useState({});
+  const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
+  const [manualWhatsapp, setManualWhatsapp] = useState({
+    phone_number: "",
+    template_name: "upperroom_reminder",
+    full_name: "",
+    date: format(new Date(), "yyyy-MM-dd"),
+    role: "Prayer",
+    prayer_leader: "",
+    worship_leader: "",
+  });
 
   const fetchBookings = async () => {
     setIsLoading(true);
@@ -100,6 +114,8 @@ const AdminDashboard = () => {
       date: booking.date,
       status: booking.status,
       notes: booking.notes || "",
+      phone_number: booking.phone_number || "",
+      whatsapp_opt_in: Boolean(booking.whatsapp_opt_in),
     });
     setEditDialogOpen(true);
   };
@@ -144,8 +160,7 @@ const AdminDashboard = () => {
   const handleExport = (type) => {
     const token = localStorage.getItem("adminToken");
     const url = type === "csv" ? exportCSV() : exportExcel();
-    
-    // Open in new window with auth header via fetch
+
     fetch(url, {
       headers: { Authorization: `Bearer ${token}` },
     })
@@ -157,6 +172,38 @@ const AdminDashboard = () => {
         link.click();
       })
       .catch(() => toast.error("Failed to export"));
+  };
+
+  const isPastorTemplate = manualWhatsapp.template_name === "upperroom_pastor_daily_summary";
+
+  const handleManualWhatsAppSend = async () => {
+    if (!manualWhatsapp.phone_number.trim()) {
+      toast.error("Enter a WhatsApp number");
+      return;
+    }
+    if (!manualWhatsapp.date) {
+      toast.error("Select the date to show in the message");
+      return;
+    }
+    if (isPastorTemplate) {
+      if (!manualWhatsapp.prayer_leader.trim() || !manualWhatsapp.worship_leader.trim()) {
+        toast.error("Enter both Prayer and Worship leader names");
+        return;
+      }
+    } else if (!manualWhatsapp.full_name.trim()) {
+      toast.error("Enter the recipient's full name");
+      return;
+    }
+
+    setIsSendingWhatsApp(true);
+    try {
+      await sendManualWhatsApp(manualWhatsapp);
+      toast.success("WhatsApp message sent successfully");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to send WhatsApp message");
+    } finally {
+      setIsSendingWhatsApp(false);
+    }
   };
 
   return (
@@ -171,7 +218,124 @@ const AdminDashboard = () => {
           <p className="text-muted-foreground">View and manage all booking slots</p>
         </div>
 
-        {/* Filters */}
+        <Card className="mb-6 border-green-200 bg-green-50/40">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-xl">
+              <MessageCircle className="h-5 w-5 text-green-700" />
+              Manual WhatsApp Sender
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Send an approved template instantly for testing, last-minute bookings or manual reminders.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+              <div className="space-y-2 lg:col-span-2">
+                <Label>WhatsApp Number</Label>
+                <div className="relative">
+                  <Phone className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    type="tel"
+                    placeholder="07xxx xxxxxx or +44..."
+                    value={manualWhatsapp.phone_number}
+                    onChange={(e) => setManualWhatsapp({ ...manualWhatsapp, phone_number: e.target.value })}
+                    className="pl-9"
+                    data-testid="manual-whatsapp-number"
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Template</Label>
+                <Select
+                  value={manualWhatsapp.template_name}
+                  onValueChange={(value) => setManualWhatsapp({ ...manualWhatsapp, template_name: value })}
+                >
+                  <SelectTrigger data-testid="manual-whatsapp-template">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="upperroom_booking_confirmation">Booking confirmation</SelectItem>
+                    <SelectItem value="upperroom_reminder">Same-day reminder</SelectItem>
+                    <SelectItem value="upperroom_pastor_daily_summary">Pastor daily summary</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Date shown in message</Label>
+                <Input
+                  type="date"
+                  value={manualWhatsapp.date}
+                  onChange={(e) => setManualWhatsapp({ ...manualWhatsapp, date: e.target.value })}
+                  data-testid="manual-whatsapp-date"
+                />
+              </div>
+            </div>
+
+            {isPastorTemplate ? (
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Prayer Leader</Label>
+                  <Input
+                    placeholder="Full name or Not booked"
+                    value={manualWhatsapp.prayer_leader}
+                    onChange={(e) => setManualWhatsapp({ ...manualWhatsapp, prayer_leader: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Worship Leader</Label>
+                  <Input
+                    placeholder="Full name or Not booked"
+                    value={manualWhatsapp.worship_leader}
+                    onChange={(e) => setManualWhatsapp({ ...manualWhatsapp, worship_leader: e.target.value })}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Full Name</Label>
+                  <Input
+                    placeholder="Recipient full name"
+                    value={manualWhatsapp.full_name}
+                    onChange={(e) => setManualWhatsapp({ ...manualWhatsapp, full_name: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Lead</Label>
+                  <Select
+                    value={manualWhatsapp.role}
+                    onValueChange={(value) => setManualWhatsapp({ ...manualWhatsapp, role: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Prayer">Prayer</SelectItem>
+                      <SelectItem value="Worship">Worship</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end">
+              <Button
+                onClick={handleManualWhatsAppSend}
+                disabled={isSendingWhatsApp}
+                className="gap-2 bg-green-600 text-white hover:bg-green-700"
+                data-testid="btn-manual-whatsapp-send"
+              >
+                {isSendingWhatsApp ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+                Send WhatsApp Now
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
         <Card className="card-warm mb-6">
           <CardContent className="p-4">
             <div className="flex flex-wrap items-end gap-4">
@@ -254,7 +418,6 @@ const AdminDashboard = () => {
           </CardContent>
         </Card>
 
-        {/* Export Buttons */}
         <div className="mb-4 flex gap-2">
           <Button
             variant="outline"
@@ -276,7 +439,6 @@ const AdminDashboard = () => {
           </Button>
         </div>
 
-        {/* Bookings Table */}
         <Card className="card-warm overflow-hidden" data-testid="bookings-table">
           <CardContent className="p-0">
             {isLoading ? (
@@ -297,6 +459,7 @@ const AdminDashboard = () => {
                       <th>Role</th>
                       <th>Date</th>
                       <th>Time</th>
+                      <th>WhatsApp</th>
                       <th>Status</th>
                       <th>Notes</th>
                       <th>Actions</th>
@@ -324,6 +487,18 @@ const AdminDashboard = () => {
                         </td>
                         <td>{format(new Date(booking.date), "MMM d, yyyy")}</td>
                         <td>8:00 PM - 9:00 PM</td>
+                        <td className="text-sm">
+                          {booking.phone_number ? (
+                            <div>
+                              <div>{booking.phone_number}</div>
+                              <div className={booking.whatsapp_opt_in ? "text-green-700" : "text-muted-foreground"}>
+                                {booking.whatsapp_opt_in ? "Notifications on" : "Notifications off"}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </td>
                         <td>
                           <span
                             className={`rounded-full px-2 py-1 text-xs font-medium ${
@@ -380,7 +555,6 @@ const AdminDashboard = () => {
           </CardContent>
         </Card>
 
-        {/* Edit Dialog */}
         <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
           <DialogContent>
             <DialogHeader>
@@ -420,6 +594,25 @@ const AdminDashboard = () => {
                 />
               </div>
               <div className="space-y-2">
+                <Label>WhatsApp Number</Label>
+                <Input
+                  type="tel"
+                  placeholder="07xxx xxxxxx or +44..."
+                  value={editData.phone_number || ""}
+                  onChange={(e) => setEditData({ ...editData, phone_number: e.target.value })}
+                  data-testid="edit-whatsapp-number"
+                />
+                <label className="flex cursor-pointer items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(editData.whatsapp_opt_in)}
+                    onChange={(e) => setEditData({ ...editData, whatsapp_opt_in: e.target.checked })}
+                    className="h-4 w-4 accent-green-600"
+                  />
+                  Send WhatsApp confirmations and reminders for this booking
+                </label>
+              </div>
+              <div className="space-y-2">
                 <Label>Status</Label>
                 <Select
                   value={editData.status}
@@ -446,7 +639,6 @@ const AdminDashboard = () => {
           </DialogContent>
         </Dialog>
 
-        {/* Delete Confirmation */}
         <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
           <AlertDialogContent>
             <AlertDialogHeader>

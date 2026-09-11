@@ -25,7 +25,7 @@ api.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem("adminToken");
-      if (window.location.pathname.startsWith("/admin") && 
+      if (window.location.pathname.startsWith("/admin") &&
           window.location.pathname !== "/admin/login") {
         window.location.href = "/admin/login";
       }
@@ -48,15 +48,16 @@ export const adminLogin = (username, password) =>
 export const getAdminBookings = (filters = {}) => {
   const params = new URLSearchParams();
   if (filters.date) params.append("date_filter", filters.date);
-  if (filters.role) params.append("role_filter", filters.role);
+  if (filters.role && filters.role !== "all") params.append("role_filter", filters.role);
   if (filters.name) params.append("name_filter", filters.name);
-  if (filters.status) params.append("status_filter", filters.status);
+  if (filters.status && filters.status !== "all") params.append("status_filter", filters.status);
   return api.get(`/admin/bookings?${params.toString()}`);
 };
 
 export const updateBooking = (id, data) => api.put(`/admin/bookings/${id}`, data);
 export const deleteBooking = (id) => api.delete(`/admin/bookings/${id}`);
 export const unlockSlot = (id) => api.post(`/admin/bookings/${id}/unlock`);
+export const sendManualWhatsApp = (data) => api.post("/admin/whatsapp/send-template", data);
 
 // Analytics
 export const getAnalytics = (month, year) =>
