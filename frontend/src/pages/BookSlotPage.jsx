@@ -23,14 +23,16 @@ import {
   Mail,
   FileText,
   Loader2,
+  Phone,
+  MessageCircle,
 } from "lucide-react";
-import { format, addDays, startOfMonth, endOfMonth, isMonday, isTuesday, isWednesday, isThursday } from "date-fns";
+import { format, addDays } from "date-fns";
 
 const steps = [
   { id: 1, title: "Your Name", icon: User },
   { id: 2, title: "Select Role", icon: HandHeart },
   { id: 3, title: "Select Date", icon: CalendarIcon },
-  { id: 4, title: "Additional Details", icon: FileText },
+  { id: 4, title: "Contact Details", icon: FileText },
 ];
 
 const BookSlotPage = () => {
@@ -45,9 +47,10 @@ const BookSlotPage = () => {
     date: searchParams.get("date") || "",
     notes: "",
     email: "",
+    phone_number: "",
+    whatsapp_opt_in: false,
   });
 
-  // Fetch availability when component mounts or date changes
   useEffect(() => {
     const fetchAvailability = async () => {
       try {
@@ -65,12 +68,11 @@ const BookSlotPage = () => {
     fetchAvailability();
   }, []);
 
-  // Check if a date has available slots for the selected role
   const isDateAvailable = (date) => {
     const dateStr = format(date, "yyyy-MM-dd");
     const dayAvailability = availability.find((a) => a.date === dateStr);
     if (!dayAvailability) return false;
-    
+
     if (formData.role === "Prayer") {
       return dayAvailability.prayer_available;
     } else if (formData.role === "Worship") {
@@ -79,20 +81,15 @@ const BookSlotPage = () => {
     return dayAvailability.prayer_available || dayAvailability.worship_available;
   };
 
-  // Disabled dates: not Mon-Thu, past dates, > 1 month, or unavailable
   const disabledDays = (date) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const oneMonthLater = addDays(today, 31);
 
-    // Disable past dates
     if (date < today) return true;
-    // Disable dates > 1 month
     if (date > oneMonthLater) return true;
-    // Disable Fri, Sat, Sun
     const day = date.getDay();
     if (day === 0 || day === 5 || day === 6) return true;
-    // Disable if slot not available for selected role
     if (formData.role && !isDateAvailable(date)) return true;
 
     return false;
@@ -124,6 +121,11 @@ const BookSlotPage = () => {
       return;
     }
 
+    if (formData.whatsapp_opt_in && !formData.phone_number.trim()) {
+      toast.error("Please enter a WhatsApp number or untick WhatsApp notifications");
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       await createBooking({
@@ -132,6 +134,8 @@ const BookSlotPage = () => {
         date: formData.date,
         notes: formData.notes.trim() || null,
         email: formData.email.trim() || null,
+        phone_number: formData.phone_number.trim() || null,
+        whatsapp_opt_in: formData.whatsapp_opt_in,
       });
       toast.success("Thank you. Your slot has been confirmed!", {
         description: `You're scheduled to Lead ${formData.role} on ${format(new Date(formData.date), "EEEE, MMMM d, yyyy")}`,
@@ -293,12 +297,62 @@ const BookSlotPage = () => {
             exit={{ opacity: 0, x: -20 }}
             className="space-y-6"
           >
-            <div className="space-y-2">
+            <div className="rounded-xl border-2 border-green-200 bg-green-50/70 p-5">
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-green-100">
+                    <MessageCircle className="h-5 w-5 text-green-700" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Label htmlFor="phone_number" className="text-base font-semibold">
+                        WhatsApp Number
+                      </Label>
+                      <span className="rounded-full bg-green-600 px-2 py-0.5 text-xs font-semibold text-white">
+                        Recommended
+                      </span>
+                    </div>
+                    <p className="text-sm text-green-800/80">
+                      The easiest way to receive your confirmation and same-day reminder.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="relative">
+                <Phone className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-green-700" />
+                <Input
+                  id="phone_number"
+                  type="tel"
+                  inputMode="tel"
+                  placeholder="07xxx xxxxxx or +44..."
+                  value={formData.phone_number}
+                  onChange={(e) => setFormData({ ...formData, phone_number: e.target.value })}
+                  className="h-12 border-green-200 bg-white pl-10 text-base focus-visible:ring-green-500"
+                  data-testid="input-whatsapp-number"
+                />
+              </div>
+
+              <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-lg bg-white/70 p-3 text-sm">
+                <input
+                  type="checkbox"
+                  checked={formData.whatsapp_opt_in}
+                  onChange={(e) => setFormData({ ...formData, whatsapp_opt_in: e.target.checked })}
+                  className="mt-0.5 h-4 w-4 accent-green-600"
+                  data-testid="checkbox-whatsapp-opt-in"
+                />
+                <span>
+                  Send my booking confirmation and reminder to this number on WhatsApp.
+                </span>
+              </label>
+            </div>
+
+            <div className="space-y-2 rounded-xl border border-border p-5">
               <Label htmlFor="email" className="text-base font-medium">
                 Email Address (Optional)
               </Label>
               <p className="text-sm text-muted-foreground">
-                Enter your email to receive a confirmation
+                You can also receive the confirmation and reminder by email.
               </p>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
@@ -328,30 +382,37 @@ const BookSlotPage = () => {
               />
             </div>
 
-            {/* Summary */}
             <div className="rounded-xl border border-orange-200 bg-orange-50/50 p-6">
               <h4 className="mb-4 font-['Playfair_Display'] text-lg font-semibold">
                 Booking Summary
               </h4>
               <div className="space-y-3 text-sm">
-                <div className="flex justify-between">
+                <div className="flex justify-between gap-4">
                   <span className="text-muted-foreground">Name:</span>
-                  <span className="font-medium">{formData.full_name}</span>
+                  <span className="text-right font-medium">{formData.full_name}</span>
                 </div>
-                <div className="flex justify-between">
+                <div className="flex justify-between gap-4">
                   <span className="text-muted-foreground">Role:</span>
-                  <span className="font-medium">Lead {formData.role}</span>
+                  <span className="text-right font-medium">Lead {formData.role}</span>
                 </div>
-                <div className="flex justify-between">
+                <div className="flex justify-between gap-4">
                   <span className="text-muted-foreground">Date:</span>
-                  <span className="font-medium">
+                  <span className="text-right font-medium">
                     {formData.date && format(new Date(formData.date), "EEEE, MMMM d, yyyy")}
                   </span>
                 </div>
-                <div className="flex justify-between">
+                <div className="flex justify-between gap-4">
                   <span className="text-muted-foreground">Time:</span>
-                  <span className="font-medium">8:00 PM - 9:00 PM UK</span>
+                  <span className="text-right font-medium">8:00 PM - 9:00 PM UK</span>
                 </div>
+                {formData.phone_number && (
+                  <div className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">WhatsApp:</span>
+                    <span className="text-right font-medium">
+                      {formData.phone_number} {formData.whatsapp_opt_in ? "✓" : "(notifications off)"}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           </motion.div>
@@ -368,7 +429,6 @@ const BookSlotPage = () => {
 
       <div className="container mx-auto px-4 py-8 md:py-12">
         <div className="mx-auto max-w-2xl">
-          {/* Header */}
           <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -382,7 +442,6 @@ const BookSlotPage = () => {
             </p>
           </motion.div>
 
-          {/* Progress Steps */}
           <div className="mb-8">
             <div className="flex items-center justify-between">
               {steps.map((step, index) => (
@@ -421,7 +480,6 @@ const BookSlotPage = () => {
             </div>
           </div>
 
-          {/* Form Card */}
           <Card className="card-warm" data-testid="booking-form-card">
             <CardHeader>
               <CardTitle className="font-['Playfair_Display'] text-xl">
@@ -431,7 +489,6 @@ const BookSlotPage = () => {
             <CardContent>
               <AnimatePresence mode="wait">{renderStepContent()}</AnimatePresence>
 
-              {/* Navigation Buttons */}
               <div className="mt-8 flex justify-between gap-4">
                 <Button
                   variant="outline"
