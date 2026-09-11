@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Query, Response
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Query, Response, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -14,7 +14,6 @@ import jwt
 import io
 import re
 import xlsxwriter
-from fastapi.responses import StreamingResponse
 import asyncio
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -46,7 +45,7 @@ WHATSAPP_ENABLED = os.environ.get("WHATSAPP_ENABLED", "false").strip().lower() i
     "1", "true", "yes", "on"
 }
 WHATSAPP_API_VERSION = os.environ.get("WHATSAPP_API_VERSION", "v26.0")
-WHATSAPP_TEMPLATE_LANGUAGE = os.environ.get("WHATSAPP_TEMPLATE_LANGUAGE", "en_GB")
+WHATSAPP_TEMPLATE_LANGUAGE = os.environ.get("WHATSAPP_TEMPLATE_LANGUAGE", "en")
 WHATSAPP_CONFIRMATION_TEMPLATE = os.environ.get(
     "WHATSAPP_CONFIRMATION_TEMPLATE", "upperroom_booking_confirmation"
 )
@@ -112,6 +111,11 @@ class Booking(BaseModel):
     email: Optional[EmailStr] = None
     phone_number: Optional[str] = None
     whatsapp_opt_in: bool = False
+    whatsapp_confirmation_status: str = "not_requested"
+    whatsapp_confirmation_sent_at: Optional[str] = None
+    whatsapp_reminder_status: str = "not_requested"
+    whatsapp_reminder_sent_at: Optional[str] = None
+    whatsapp_last_error: Optional[str] = None
     edited_by_admin: bool = False
     last_updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -140,6 +144,10 @@ class ManualWhatsAppRequest(BaseModel):
     role: Optional[str] = Field(default=None, pattern="^(Prayer|Worship)$")
     prayer_leader: Optional[str] = None
     worship_leader: Optional[str] = None
+
+
+class BookingWhatsAppSendRequest(BaseModel):
+    message_type: str = Field(..., pattern="^(confirmation|reminder)$")
 
 
 def format_name_display(full_name: str) -> str:
@@ -187,6 +195,58 @@ def normalize_whatsapp_number(phone_number: Optional[str]) -> Optional[str]:
     if not 10 <= len(digits) <= 15:
         raise ValueError("Please enter a valid WhatsApp number, for example 07xxx xxxxxx or +44...")
     return digits
+
+
+def mask_phone(phone_number: Optional[str]) -> Optional[str]:
+    if not phone_number:
+        return None
+    digits = re.sub(r"\D", "", phone_number)
+    if len(digits) <= 6:
+        return "••••" + digits[-2:]
+    return f"+{digits[:2]} •••• ••{digits[-3:]}"
+
+
+def get_client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "unknown")
+    if not ip or ip == "unknown":
+        return "unknown"
+    if ":" in ip:
+        parts = ip.split(":")
+        return ":".join(parts[:4]) + "::/64"
+    parts = ip.split(".")
+    if len(parts) == 4:
+        return ".".join(parts[:3]) + ".0/24"
+    return "masked"
+
+
+async def write_audit_log(
+    event_type: str,
+    title: str,
+    description: str,
+    level: str = "info",
+    booking_id: Optional[str] = None,
+    participant_name: Optional[str] = None,
+    details: Optional[dict] = None,
+    request: Optional[Request] = None,
+):
+    doc = {
+        "id": str(uuid.uuid4()),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "event_type": event_type,
+        "level": level,
+        "title": title,
+        "description": description,
+        "booking_id": booking_id,
+        "participant_name": participant_name,
+        "details": details or {},
+        "client_ip": get_client_ip(request) if request else None,
+        "user_agent": (request.headers.get("user-agent", "")[:180] if request else None),
+    }
+    try:
+        await db.audit_logs.insert_one(doc)
+    except Exception as exc:
+        logger.error("Failed to write audit log: %s", exc)
 
 
 def _send_whatsapp_template(
@@ -242,7 +302,7 @@ def _send_whatsapp_template(
             logger.error(message)
             if raise_on_error:
                 raise RuntimeError(message)
-            return {"success": False, "status_code": resp.status_code}
+            return {"success": False, "status_code": resp.status_code, "reason": body_snippet}
         response_data = resp.json() if resp.content else {}
         logger.info("WhatsApp template %s sent to %s", template_name, normalized_number)
         return {"success": True, "response": response_data}
@@ -316,7 +376,7 @@ def send_confirmation_email(booking: dict):
     <div style="background: #fff7ed; padding: 20px; border-radius: 8px; margin: 20px 0;">
     <p><strong>Role:</strong> Lead {booking['role']}</p><p><strong>Date:</strong> {booking['date']}</p><p><strong>Time:</strong> 8:00 PM - 9:00 PM (UK Time)</p></div>
     <p>Thank you for your participation.</p><div style="text-align: center; margin: 25px 0;"><a href="https://us02web.zoom.us/j/9033071964" style="display: inline-block; background: #2563eb; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: bold;">Join Zoom Meeting</a></div>
-    <p style="color: #666; font-size: 12px; margin-top: 30px;">If you need to make changes, please contact the admin.</p></div></body></html>
+    </div></body></html>
     """
     _send_email_via_resend(booking["email"], subject, html)
 
@@ -331,9 +391,8 @@ def send_reminder_email(booking: dict):
     <h1 style="color: #ea580c; margin-bottom: 20px;">Reminder: Meeting in 4 Hours!</h1><p>Dear {booking['full_name']},</p>
     <p>This is a friendly reminder that you are scheduled to participate in today's online meeting.</p>
     <div style="background: #fff7ed; padding: 20px; border-radius: 8px; margin: 20px 0;"><p><strong>Role:</strong> Lead {booking['role']}</p><p><strong>Date:</strong> Today ({booking['date']})</p><p><strong>Time:</strong> 8:00 PM - 9:00 PM (UK Time)</p></div>
-    <p style="color: #ea580c; font-weight: bold;">Please be ready to join 5-10 minutes early.</p><p>Thank you for your participation.</p>
     <div style="text-align: center; margin: 25px 0;"><a href="https://us02web.zoom.us/j/9033071964" style="display: inline-block; background: #2563eb; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: bold;">Join Zoom Meeting</a></div>
-    <p style="color: #666; font-size: 12px; margin-top: 30px;">If you cannot attend, please contact the admin as soon as possible.</p></div></body></html>
+    </div></body></html>
     """
     _send_email_via_resend(booking["email"], subject, html)
 
@@ -345,20 +404,60 @@ def send_pastor_leading_email(pastor_email: str, pastor_name: str, today_str: st
     html = f"""
     <html><body style="font-family: Arial, sans-serif; padding: 20px; background-color: #fff5eb;">
     <div style="max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-    <h1 style="color: #ea580c; margin-bottom: 20px;">Today's Upper Room Leading</h1><p style="margin-top: 0;">Good Evening {pastor_name},</p><p>Here are the leaders scheduled for tonight's Upper Room meeting.</p>
-    <div style="background: #fff7ed; padding: 20px; border-radius: 8px; margin: 20px 0;"><p><strong>Date:</strong> {today_str}</p><p><strong>Time:</strong> 8:00 PM - 9:00 PM (UK Time)</p></div>
-    <div style="background: #fff7ed; padding: 20px; border-radius: 8px; margin: 20px 0;"><p style="margin: 0 0 8px 0;"><strong>Prayer:</strong> {prayer_leader}</p><p style="margin: 0;"><strong>Worship:</strong> {worship_leader}</p></div>
-    <div style="text-align: center; margin: 25px 0;"><a href="https://us02web.zoom.us/j/9033071964" style="display: inline-block; background: #2563eb; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: bold;">Join Zoom Meeting</a></div>
-    <p style="color: #666; font-size: 12px; margin-top: 30px;">This message is sent automatically by Hebron Schedule.</p></div></body></html>
+    <h1 style="color: #ea580c; margin-bottom: 20px;">Today's Upper Room Leading</h1><p style="margin-top: 0;">Good Evening {pastor_name},</p>
+    <div style="background: #fff7ed; padding: 20px; border-radius: 8px; margin: 20px 0;"><p><strong>Date:</strong> {today_str}</p><p><strong>Time:</strong> 8:00 PM - 9:00 PM (UK Time)</p><p><strong>Prayer:</strong> {prayer_leader}</p><p><strong>Worship:</strong> {worship_leader}</p></div>
+    </div></body></html>
     """
     _send_email_via_resend(pastor_email, subject, html)
+
+
+async def send_booking_whatsapp_and_record(booking: dict, message_type: str, source: str = "automatic") -> dict:
+    booking_id = booking.get("id")
+    if message_type == "confirmation":
+        result = await asyncio.to_thread(send_booking_confirmation_whatsapp, booking)
+        status_field = "whatsapp_confirmation_status"
+        sent_field = "whatsapp_confirmation_sent_at"
+        event_type = "whatsapp_confirmation"
+        label = "booking confirmation"
+    else:
+        result = await asyncio.to_thread(send_booking_reminder_whatsapp, booking)
+        status_field = "whatsapp_reminder_status"
+        sent_field = "whatsapp_reminder_sent_at"
+        event_type = "whatsapp_reminder"
+        label = "same-day reminder"
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    success = bool(result.get("success"))
+    update = {
+        status_field: "sent" if success else "failed",
+        "whatsapp_last_error": None if success else (result.get("reason") or "WhatsApp send failed")[:500],
+        "last_updated_at": now_iso,
+    }
+    if success:
+        update[sent_field] = now_iso
+    if booking_id:
+        await db.bookings.update_one({"id": booking_id}, {"$set": update})
+    await write_audit_log(
+        event_type,
+        f"WhatsApp {label} {'sent' if success else 'failed'}",
+        f"{booking.get('full_name', 'Participant')} — Lead {booking.get('role', '')} on {booking.get('date', '')}",
+        level="success" if success else "error",
+        booking_id=booking_id,
+        participant_name=booking.get("full_name"),
+        details={
+            "source": source,
+            "message_type": message_type,
+            "phone": mask_phone(booking.get("phone_number")),
+            "status": "sent" if success else "failed",
+        },
+    )
+    return result
 
 
 async def send_daily_reminders():
     try:
         uk_now = datetime.now(UK_TZ)
         today_str = uk_now.strftime("%Y-%m-%d")
-        logger.info(f"Running reminder job for {today_str}")
         bookings = await db.bookings.find({"date": today_str, "status": "Booked"}, {"_id": 0}).to_list(100)
         email_count = 0
         whatsapp_count = 0
@@ -367,19 +466,24 @@ async def send_daily_reminders():
                 await asyncio.to_thread(send_reminder_email, booking)
                 email_count += 1
             if booking.get("whatsapp_opt_in") and booking.get("phone_number"):
-                await asyncio.to_thread(send_booking_reminder_whatsapp, booking)
+                await send_booking_whatsapp_and_record(booking, "reminder", "scheduled_4pm")
                 whatsapp_count += 1
             await asyncio.sleep(0.25)
-        logger.info("Completed daily reminders: %s email attempts, %s WhatsApp attempts", email_count, whatsapp_count)
+        await write_audit_log(
+            "scheduler_reminders",
+            "4 PM reminder run completed",
+            f"Processed {len(bookings)} booking(s): {whatsapp_count} WhatsApp and {email_count} email attempt(s).",
+            details={"booking_count": len(bookings), "whatsapp_attempts": whatsapp_count, "email_attempts": email_count},
+        )
     except Exception as e:
         logger.error(f"Error in send_daily_reminders: {e}")
+        await write_audit_log("scheduler_reminders", "4 PM reminder run failed", str(e), level="error")
 
 
 async def send_pastor_daily_summary():
     try:
         uk_now = datetime.now(UK_TZ)
         if uk_now.weekday() > 3:
-            logger.info("Pastor summary skipped (not Mon-Thu).")
             return
         today_str = uk_now.strftime("%Y-%m-%d")
         todays_bookings = await db.bookings.find({"date": today_str, "status": "Booked"}, {"_id": 0}).to_list(50)
@@ -392,13 +496,19 @@ async def send_pastor_daily_summary():
                 worship_leader = b.get("full_name", "Unknown")
         if PASTOR_EMAIL:
             await asyncio.to_thread(send_pastor_leading_email, PASTOR_EMAIL, PASTOR_NAME, today_str, prayer_leader, worship_leader)
+        whatsapp_result = None
         if PASTOR_WHATSAPP_NUMBER:
-            await asyncio.to_thread(send_pastor_summary_whatsapp, PASTOR_WHATSAPP_NUMBER, today_str, prayer_leader, worship_leader)
-        else:
-            logger.info("PASTOR_WHATSAPP_NUMBER is not set; WhatsApp pastor summary skipped.")
-        logger.info("Pastor summary completed (email/WhatsApp where configured).")
+            whatsapp_result = await asyncio.to_thread(send_pastor_summary_whatsapp, PASTOR_WHATSAPP_NUMBER, today_str, prayer_leader, worship_leader)
+        await write_audit_log(
+            "pastor_summary",
+            "Pastor daily summary processed",
+            f"Prayer: {prayer_leader} · Worship: {worship_leader}",
+            level="success" if not whatsapp_result or whatsapp_result.get("success") else "error",
+            details={"date": today_str, "prayer": prayer_leader, "worship": worship_leader, "whatsapp_sent": bool(whatsapp_result and whatsapp_result.get("success"))},
+        )
     except Exception as e:
         logger.error(f"Error in send_pastor_daily_summary: {e}")
+        await write_audit_log("pastor_summary", "Pastor daily summary failed", str(e), level="error")
 
 
 async def verify_admin_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
@@ -426,7 +536,7 @@ async def health_check():
 
 
 @api_router.post("/bookings", response_model=Booking)
-async def create_booking(booking_data: BookingCreate):
+async def create_booking(booking_data: BookingCreate, request: Request):
     if not validate_booking_date(booking_data.date):
         raise HTTPException(status_code=400, detail="Invalid date. Please select Monday-Thursday within the next month.")
     try:
@@ -441,7 +551,7 @@ async def create_booking(booking_data: BookingCreate):
         raise HTTPException(status_code=409, detail="This slot is already taken. Please choose another date.")
 
     user_booking = await db.bookings.find_one(
-        {"date": booking_data.date, "full_name": {"$regex": f"^{booking_data.full_name}$", "$options": "i"}, "status": "Booked"},
+        {"date": booking_data.date, "full_name": {"$regex": f"^{re.escape(booking_data.full_name)}$", "$options": "i"}, "status": "Booked"},
         {"_id": 0},
     )
     if user_booking:
@@ -449,6 +559,10 @@ async def create_booking(booking_data: BookingCreate):
 
     booking_values = booking_data.model_dump()
     booking_values["phone_number"] = normalized_phone or None
+    if normalized_phone:
+        booking_values["whatsapp_opt_in"] = True
+        booking_values["whatsapp_confirmation_status"] = "pending"
+        booking_values["whatsapp_reminder_status"] = "pending"
     booking = Booking(**booking_values)
     doc = booking.model_dump()
     doc["created_at"] = doc["created_at"].isoformat()
@@ -462,10 +576,21 @@ async def create_booking(booking_data: BookingCreate):
     if result.matched_count > 0:
         raise HTTPException(status_code=409, detail="This slot is already taken. Please choose another date.")
 
+    await write_audit_log(
+        "booking_created",
+        "Booking created",
+        f"{booking.full_name} booked Lead {booking.role} for {booking.date}.",
+        level="success",
+        booking_id=booking.id,
+        participant_name=booking.full_name,
+        details={"role": booking.role, "date": booking.date, "whatsapp": mask_phone(booking.phone_number), "email_provided": bool(booking.email)},
+        request=request,
+    )
+
     if booking_data.email:
         asyncio.create_task(asyncio.to_thread(send_confirmation_email, doc))
     if booking.whatsapp_opt_in and booking.phone_number:
-        asyncio.create_task(asyncio.to_thread(send_booking_confirmation_whatsapp, doc))
+        asyncio.create_task(send_booking_whatsapp_and_record(doc, "confirmation", "booking_created"))
     return booking
 
 
@@ -500,7 +625,7 @@ async def get_availability(start_date: str = Query(...), end_date: str = Query(.
 async def get_public_bookings():
     bookings = await db.bookings.find(
         {"status": "Booked"},
-        {"_id": 0, "email": 0, "notes": 0, "phone_number": 0, "whatsapp_opt_in": 0},
+        {"_id": 0, "email": 0, "notes": 0, "phone_number": 0, "whatsapp_opt_in": 0, "whatsapp_last_error": 0},
     ).to_list(1000)
     for booking in bookings:
         booking["display_name"] = format_name_display(booking["full_name"])
@@ -512,7 +637,7 @@ async def get_public_bookings():
 
 
 @api_router.post("/admin/login")
-async def admin_login(credentials: AdminLogin):
+async def admin_login(credentials: AdminLogin, request: Request):
     if not ADMIN_PASSWORD:
         raise HTTPException(status_code=503, detail="Admin login is not configured")
     if credentials.username == ADMIN_USERNAME and credentials.password == ADMIN_PASSWORD:
@@ -521,7 +646,9 @@ async def admin_login(credentials: AdminLogin):
             JWT_SECRET,
             algorithm=JWT_ALGORITHM,
         )
+        await write_audit_log("admin_login", "Admin signed in", "A successful admin login was recorded.", request=request)
         return {"token": token, "username": credentials.username}
+    await write_audit_log("admin_login_failed", "Failed admin login", "An invalid admin login attempt was recorded.", level="warning", request=request)
     raise HTTPException(status_code=401, detail="Invalid credentials")
 
 
@@ -539,7 +666,7 @@ async def get_admin_bookings(
     if role_filter:
         query["role"] = role_filter
     if name_filter:
-        query["full_name"] = {"$regex": name_filter, "$options": "i"}
+        query["full_name"] = {"$regex": re.escape(name_filter), "$options": "i"}
     if status_filter:
         query["status"] = status_filter
     bookings = await db.bookings.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
@@ -550,11 +677,71 @@ async def get_admin_bookings(
             booking["last_updated_at"] = datetime.fromisoformat(booking["last_updated_at"])
         booking.setdefault("phone_number", None)
         booking.setdefault("whatsapp_opt_in", False)
+        booking.setdefault("whatsapp_confirmation_status", "not_requested")
+        booking.setdefault("whatsapp_reminder_status", "not_requested")
     return bookings
 
 
+@api_router.get("/admin/today")
+async def get_admin_today(admin: dict = Depends(verify_admin_token)):
+    today_str = datetime.now(UK_TZ).strftime("%Y-%m-%d")
+    bookings = await db.bookings.find({"date": today_str, "status": "Booked"}, {"_id": 0}).to_list(10)
+    prayer = next((b for b in bookings if b.get("role") == "Prayer"), None)
+    worship = next((b for b in bookings if b.get("role") == "Worship"), None)
+    return {
+        "date": today_str,
+        "prayer": prayer,
+        "worship": worship,
+        "meeting_time": "8:00 PM - 9:00 PM UK",
+        "reminder_time": "4:00 PM UK",
+        "pastor_summary_time": f"{PASTOR_EMAIL_HOUR:02d}:{PASTOR_EMAIL_MINUTE:02d} UK",
+    }
+
+
+@api_router.get("/admin/whatsapp/status")
+async def get_whatsapp_status(admin: dict = Depends(verify_admin_token)):
+    credentials_configured = bool(WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID)
+    templates_configured = bool(WHATSAPP_CONFIRMATION_TEMPLATE and WHATSAPP_REMINDER_TEMPLATE and WHATSAPP_PASTOR_TEMPLATE)
+    return {
+        "enabled": WHATSAPP_ENABLED,
+        "credentials_configured": credentials_configured,
+        "pastor_number_configured": bool(PASTOR_WHATSAPP_NUMBER),
+        "templates_configured": templates_configured,
+        "language": WHATSAPP_TEMPLATE_LANGUAGE,
+        "api_version": WHATSAPP_API_VERSION,
+        "confirmation_template": WHATSAPP_CONFIRMATION_TEMPLATE,
+        "reminder_template": WHATSAPP_REMINDER_TEMPLATE,
+        "pastor_template": WHATSAPP_PASTOR_TEMPLATE,
+        "healthy": WHATSAPP_ENABLED and credentials_configured and templates_configured,
+    }
+
+
+@api_router.get("/admin/logs")
+async def get_admin_logs(
+    admin: dict = Depends(verify_admin_token),
+    event_type: Optional[str] = None,
+    level: Optional[str] = None,
+    search: Optional[str] = None,
+    limit: int = Query(100, ge=1, le=300),
+):
+    query = {}
+    if event_type and event_type != "all":
+        query["event_type"] = event_type
+    if level and level != "all":
+        query["level"] = level
+    if search:
+        escaped = re.escape(search)
+        query["$or"] = [
+            {"title": {"$regex": escaped, "$options": "i"}},
+            {"description": {"$regex": escaped, "$options": "i"}},
+            {"participant_name": {"$regex": escaped, "$options": "i"}},
+        ]
+    logs = await db.audit_logs.find(query, {"_id": 0, "user_agent": 0}).sort("timestamp", -1).to_list(limit)
+    return {"logs": logs, "count": len(logs)}
+
+
 @api_router.put("/admin/bookings/{booking_id}")
-async def update_booking(booking_id: str, update_data: BookingUpdate, admin: dict = Depends(verify_admin_token)):
+async def update_booking(booking_id: str, update_data: BookingUpdate, request: Request, admin: dict = Depends(verify_admin_token)):
     update_dict = {k: v for k, v in update_data.model_dump().items() if v is not None}
     if not update_dict:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -566,8 +753,10 @@ async def update_booking(booking_id: str, update_data: BookingUpdate, admin: dic
             update_dict["phone_number"] = normalize_whatsapp_number(update_dict["phone_number"])
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        if not update_dict["phone_number"]:
-            update_dict["whatsapp_opt_in"] = False
+        update_dict["whatsapp_opt_in"] = bool(update_dict["phone_number"])
+        if update_dict["phone_number"] and update_dict["phone_number"] != existing.get("phone_number"):
+            update_dict["whatsapp_confirmation_status"] = "pending"
+            update_dict["whatsapp_reminder_status"] = "pending"
     effective_phone = update_dict.get("phone_number", existing.get("phone_number"))
     effective_opt_in = update_dict.get("whatsapp_opt_in", existing.get("whatsapp_opt_in", False))
     if effective_opt_in and not effective_phone:
@@ -583,33 +772,89 @@ async def update_booking(booking_id: str, update_data: BookingUpdate, admin: dic
             raise HTTPException(status_code=409, detail="This slot is already taken by another booking.")
     update_dict["edited_by_admin"] = True
     update_dict["last_updated_at"] = datetime.now(timezone.utc).isoformat()
-    result = await db.bookings.update_one({"id": booking_id}, {"$set": update_dict})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Booking not found")
-    return await db.bookings.find_one({"id": booking_id}, {"_id": 0})
+    await db.bookings.update_one({"id": booking_id}, {"$set": update_dict})
+    updated = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
+    await write_audit_log(
+        "booking_updated",
+        "Booking updated",
+        f"{updated.get('full_name')} — Lead {updated.get('role')} on {updated.get('date')}.",
+        booking_id=booking_id,
+        participant_name=updated.get("full_name"),
+        details={"changed_fields": list(update_dict.keys())},
+        request=request,
+    )
+    return updated
 
 
 @api_router.delete("/admin/bookings/{booking_id}")
-async def delete_booking(booking_id: str, admin: dict = Depends(verify_admin_token)):
-    result = await db.bookings.delete_one({"id": booking_id})
-    if result.deleted_count == 0:
+async def delete_booking(booking_id: str, request: Request, admin: dict = Depends(verify_admin_token)):
+    existing = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
+    if not existing:
         raise HTTPException(status_code=404, detail="Booking not found")
+    await db.bookings.delete_one({"id": booking_id})
+    await write_audit_log(
+        "booking_deleted",
+        "Booking deleted",
+        f"{existing.get('full_name')} — Lead {existing.get('role')} on {existing.get('date')}.",
+        level="warning",
+        booking_id=booking_id,
+        participant_name=existing.get("full_name"),
+        request=request,
+    )
     return {"message": "Booking deleted successfully"}
 
 
 @api_router.post("/admin/bookings/{booking_id}/unlock")
-async def unlock_slot(booking_id: str, admin: dict = Depends(verify_admin_token)):
-    result = await db.bookings.update_one(
+async def unlock_slot(booking_id: str, request: Request, admin: dict = Depends(verify_admin_token)):
+    existing = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    await db.bookings.update_one(
         {"id": booking_id},
         {"$set": {"status": "Cancelled", "edited_by_admin": True, "last_updated_at": datetime.now(timezone.utc).isoformat()}},
     )
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Booking not found")
+    await write_audit_log(
+        "booking_cancelled",
+        "Booking cancelled / slot unlocked",
+        f"{existing.get('full_name')} — Lead {existing.get('role')} on {existing.get('date')}.",
+        level="warning",
+        booking_id=booking_id,
+        participant_name=existing.get("full_name"),
+        request=request,
+    )
     return {"message": "Slot unlocked successfully"}
 
 
+@api_router.post("/admin/bookings/{booking_id}/whatsapp/send")
+async def send_booking_whatsapp_now(
+    booking_id: str,
+    send_request: BookingWhatsAppSendRequest,
+    request: Request,
+    admin: dict = Depends(verify_admin_token),
+):
+    booking = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if not booking.get("phone_number"):
+        raise HTTPException(status_code=400, detail="This booking does not have a WhatsApp number.")
+    result = await send_booking_whatsapp_and_record(booking, send_request.message_type, "admin_send_now")
+    if not result.get("success"):
+        raise HTTPException(status_code=502, detail=result.get("reason") or "Meta could not send the WhatsApp message.")
+    await write_audit_log(
+        "admin_send_now",
+        "Admin sent WhatsApp now",
+        f"{send_request.message_type.title()} sent to {booking.get('full_name')}.",
+        level="success",
+        booking_id=booking_id,
+        participant_name=booking.get("full_name"),
+        details={"message_type": send_request.message_type, "phone": mask_phone(booking.get("phone_number"))},
+        request=request,
+    )
+    return {"message": f"WhatsApp {send_request.message_type} sent successfully"}
+
+
 @api_router.post("/admin/whatsapp/send-template")
-async def admin_send_whatsapp_template(request_data: ManualWhatsAppRequest, admin: dict = Depends(verify_admin_token)):
+async def admin_send_whatsapp_template(request_data: ManualWhatsAppRequest, request: Request, admin: dict = Depends(verify_admin_token)):
     if not WHATSAPP_ENABLED:
         raise HTTPException(status_code=503, detail="WhatsApp sending is currently disabled.")
     try:
@@ -619,11 +864,22 @@ async def admin_send_whatsapp_template(request_data: ManualWhatsAppRequest, admi
             if not request_data.prayer_leader or not request_data.worship_leader:
                 raise HTTPException(status_code=400, detail="Prayer and Worship leader names are required for the pastor summary.")
             parameters = [formatted_date, request_data.prayer_leader.strip(), request_data.worship_leader.strip()]
+            participant_name = None
         else:
             if not request_data.full_name or not request_data.role:
                 raise HTTPException(status_code=400, detail="Full name and Lead are required for this template.")
             parameters = [request_data.full_name.strip(), formatted_date, request_data.role]
+            participant_name = request_data.full_name.strip()
         result = await asyncio.to_thread(_send_whatsapp_template, normalized_phone, request_data.template_name, parameters, True)
+        await write_audit_log(
+            "manual_whatsapp",
+            "Manual WhatsApp sent",
+            f"Template {request_data.template_name} sent successfully.",
+            level="success",
+            participant_name=participant_name,
+            details={"template": request_data.template_name, "phone": mask_phone(normalized_phone), "date": request_data.date},
+            request=request,
+        )
         return {"message": "WhatsApp message sent successfully", "template": request_data.template_name, "phone_number": normalized_phone, "result": result}
     except HTTPException:
         raise
@@ -631,7 +887,8 @@ async def admin_send_whatsapp_template(request_data: ManualWhatsAppRequest, admi
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         logger.error("Manual WhatsApp send failed: %s", exc)
-        raise HTTPException(status_code=502, detail="Meta could not send the WhatsApp message. Check Railway logs for details.") from exc
+        await write_audit_log("manual_whatsapp", "Manual WhatsApp failed", str(exc), level="error", request=request)
+        raise HTTPException(status_code=502, detail="Meta could not send the WhatsApp message. Check the Admin Logs page for details.") from exc
 
 
 @api_router.get("/admin/analytics")
@@ -659,7 +916,7 @@ async def get_analytics(admin: dict = Depends(verify_admin_token), month: Option
 
 @api_router.get("/admin/participant-history")
 async def get_participant_history(name: str, admin: dict = Depends(verify_admin_token)):
-    bookings = await db.bookings.find({"full_name": {"$regex": name, "$options": "i"}, "status": "Booked"}, {"_id": 0}).sort("date", -1).to_list(1000)
+    bookings = await db.bookings.find({"full_name": {"$regex": re.escape(name), "$options": "i"}, "status": "Booked"}, {"_id": 0}).sort("date", -1).to_list(1000)
     prayer_count = sum(1 for b in bookings if b["role"] == "Prayer")
     worship_count = sum(1 for b in bookings if b["role"] == "Worship")
     return {"name": name, "total_services": len(bookings), "prayer_count": prayer_count, "worship_count": worship_count, "history": bookings}
@@ -706,9 +963,9 @@ async def export_bookings_csv(admin: dict = Depends(verify_admin_token), month: 
         query["date"] = {"$gte": start_date, "$lt": end_date}
     bookings = await db.bookings.find(query, {"_id": 0}).sort("date", 1).to_list(10000)
     output = io.StringIO()
-    output.write("ID,Full Name,Role,Date,Time,Status,WhatsApp Number,WhatsApp Notifications,Notes,Created At\n")
+    output.write("ID,Full Name,Role,Date,Time,Status,WhatsApp Number,Confirmation Status,Reminder Status,Notes,Created At\n")
     for b in bookings:
-        output.write(f"{b.get('id','')},{b.get('full_name','')},{b.get('role','')},{b.get('date','')},8:00 PM - 9:00 PM,{b.get('status','')},{b.get('phone_number','') or ''},{b.get('whatsapp_opt_in',False)},{b.get('notes','') or ''},{b.get('created_at','')}\n")
+        output.write(f"{b.get('id','')},{b.get('full_name','')},{b.get('role','')},{b.get('date','')},8:00 PM - 9:00 PM,{b.get('status','')},{b.get('phone_number','') or ''},{b.get('whatsapp_confirmation_status','')},{b.get('whatsapp_reminder_status','')},{b.get('notes','') or ''},{b.get('created_at','')}\n")
     output.seek(0)
     return Response(content=output.getvalue(), media_type="text/csv", headers={"Content-Disposition": f"attachment; filename=bookings_{datetime.now().strftime('%Y%m%d')}.csv"})
 
@@ -724,11 +981,13 @@ async def export_bookings_excel(admin: dict = Depends(verify_admin_token), month
     output = io.BytesIO()
     workbook = xlsxwriter.Workbook(output)
     worksheet = workbook.add_worksheet("Bookings")
-    headers = ["ID", "Full Name", "Role", "Date", "Time", "Status", "WhatsApp Number", "WhatsApp Notifications", "Notes", "Created At"]
+    headers = ["ID", "Full Name", "Role", "Date", "Time", "Status", "WhatsApp Number", "Confirmation Status", "Reminder Status", "Notes", "Created At"]
     for col, header in enumerate(headers):
         worksheet.write(0, col, header)
     for row, b in enumerate(bookings, start=1):
-        worksheet.write(row, 0, b.get("id", "")); worksheet.write(row, 1, b.get("full_name", "")); worksheet.write(row, 2, b.get("role", "")); worksheet.write(row, 3, b.get("date", "")); worksheet.write(row, 4, "8:00 PM - 9:00 PM"); worksheet.write(row, 5, b.get("status", "")); worksheet.write(row, 6, b.get("phone_number", "") or ""); worksheet.write(row, 7, "Yes" if b.get("whatsapp_opt_in") else "No"); worksheet.write(row, 8, b.get("notes", "") or ""); worksheet.write(row, 9, str(b.get("created_at", "")))
+        values = [b.get("id", ""), b.get("full_name", ""), b.get("role", ""), b.get("date", ""), "8:00 PM - 9:00 PM", b.get("status", ""), b.get("phone_number", "") or "", b.get("whatsapp_confirmation_status", ""), b.get("whatsapp_reminder_status", ""), b.get("notes", "") or "", str(b.get("created_at", ""))]
+        for col, value in enumerate(values):
+            worksheet.write(row, col, value)
     workbook.close(); output.seek(0)
     return Response(content=output.getvalue(), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f"attachment; filename=bookings_{datetime.now().strftime('%Y%m%d')}.xlsx"})
 
@@ -765,8 +1024,6 @@ async def startup_scheduler():
     scheduler.add_job(send_pastor_daily_summary, CronTrigger(hour=PASTOR_EMAIL_HOUR, minute=PASTOR_EMAIL_MINUTE, timezone=UK_TZ), id="pastor_summary", replace_existing=True)
     scheduler.start()
     logger.info("Scheduler started (member reminders + pastor summary enabled).")
-    logger.info("Member reminder: 4:00 PM UK time.")
-    logger.info(f"Pastor summary: {PASTOR_EMAIL_HOUR:02d}:{PASTOR_EMAIL_MINUTE:02d} UK time.")
     logger.info("WhatsApp enabled: %s", WHATSAPP_ENABLED)
 
 
