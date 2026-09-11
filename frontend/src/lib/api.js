@@ -10,7 +10,6 @@ const api = axios.create({
   },
 });
 
-// Add auth token to requests if available
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("adminToken");
   if (token) {
@@ -19,7 +18,6 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Handle auth errors
 api.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -34,17 +32,14 @@ api.interceptors.response.use(
   }
 );
 
-// Public endpoints
 export const createBooking = (data) => api.post("/bookings", data);
 export const getAvailability = (startDate, endDate) =>
   api.get(`/bookings/availability?start_date=${startDate}&end_date=${endDate}`);
 export const getPublicBookings = () => api.get("/bookings/public");
 
-// Admin auth
 export const adminLogin = (username, password) =>
   api.post("/admin/login", { username, password });
 
-// Admin endpoints
 export const getAdminBookings = (filters = {}) => {
   const params = new URLSearchParams();
   if (filters.date) params.append("date_filter", filters.date);
@@ -54,22 +49,32 @@ export const getAdminBookings = (filters = {}) => {
   return api.get(`/admin/bookings?${params.toString()}`);
 };
 
+export const getAdminToday = () => api.get("/admin/today");
+export const getWhatsAppStatus = () => api.get("/admin/whatsapp/status");
+export const getAdminLogs = (filters = {}) => {
+  const params = new URLSearchParams();
+  if (filters.event_type && filters.event_type !== "all") params.append("event_type", filters.event_type);
+  if (filters.level && filters.level !== "all") params.append("level", filters.level);
+  if (filters.search) params.append("search", filters.search);
+  params.append("limit", String(filters.limit || 100));
+  return api.get(`/admin/logs?${params.toString()}`);
+};
+
 export const updateBooking = (id, data) => api.put(`/admin/bookings/${id}`, data);
 export const deleteBooking = (id) => api.delete(`/admin/bookings/${id}`);
 export const unlockSlot = (id) => api.post(`/admin/bookings/${id}/unlock`);
+export const sendBookingWhatsAppNow = (id, messageType) =>
+  api.post(`/admin/bookings/${id}/whatsapp/send`, { message_type: messageType });
 export const sendManualWhatsApp = (data) => api.post("/admin/whatsapp/send-template", data);
 
-// Analytics
 export const getAnalytics = (month, year) =>
   api.get(`/admin/analytics?month=${month}&year=${year}`);
 export const getParticipantHistory = (name) =>
   api.get(`/admin/participant-history?name=${encodeURIComponent(name)}`);
 
-// Reports
 export const getMonthlyReport = (month, year) =>
   api.get(`/admin/reports/monthly?month=${month}&year=${year}`);
 
-// Export
 export const exportCSV = (month, year) => {
   const params = month && year ? `?month=${month}&year=${year}` : "";
   return `${API_URL}/admin/export/csv${params}`;
