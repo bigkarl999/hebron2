@@ -8,6 +8,7 @@ import AdminLoginPage from "@/pages/AdminLoginPage";
 import AdminDashboard from "@/pages/AdminDashboard";
 import AdminAnalytics from "@/pages/AdminAnalytics";
 import AdminReports from "@/pages/AdminReports";
+import AdminLogs from "@/pages/AdminLogs";
 import ProtectedRoute from "@/components/ProtectedRoute";
 
 function App() {
@@ -24,6 +25,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <AdminDashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/logs"
+            element={
+              <ProtectedRoute>
+                <AdminLogs />
               </ProtectedRoute>
             }
           />
