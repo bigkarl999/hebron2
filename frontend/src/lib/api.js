@@ -48,9 +48,9 @@ export const adminLogin = (username, password) =>
 export const getAdminBookings = (filters = {}) => {
   const params = new URLSearchParams();
   if (filters.date) params.append("date_filter", filters.date);
-  if (filters.role) params.append("role_filter", filters.role);
+  if (filters.role && filters.role !== "all") params.append("role_filter", filters.role);
   if (filters.name) params.append("name_filter", filters.name);
-  if (filters.status) params.append("status_filter", filters.status);
+  if (filters.status && filters.status !== "all") params.append("status_filter", filters.status);
   return api.get(`/admin/bookings?${params.toString()}`);
 };
 
