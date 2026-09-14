@@ -47,14 +47,25 @@ WHATSAPP_ENABLED = os.environ.get("WHATSAPP_ENABLED", "false").strip().lower() i
 WHATSAPP_API_VERSION = os.environ.get("WHATSAPP_API_VERSION", "v26.0")
 WHATSAPP_TEMPLATE_LANGUAGE = os.environ.get("WHATSAPP_TEMPLATE_LANGUAGE", "en")
 WHATSAPP_CONFIRMATION_TEMPLATE = os.environ.get(
-    "WHATSAPP_CONFIRMATION_TEMPLATE", "upperroom_booking_confirmation"
+    "WHATSAPP_CONFIRMATION_TEMPLATE", "upperroom_booking_confirmation1"
 )
 WHATSAPP_REMINDER_TEMPLATE = os.environ.get(
-    "WHATSAPP_REMINDER_TEMPLATE", "upperroom_reminder"
+    "WHATSAPP_REMINDER_TEMPLATE", "upperroom_reminder1"
 )
 WHATSAPP_PASTOR_TEMPLATE = os.environ.get(
-    "WHATSAPP_PASTOR_TEMPLATE", "upperroom_pastor_daily_summary"
+    "WHATSAPP_PASTOR_TEMPLATE", "upperroom_pastor_daily_summary1"
 )
+
+# Keep existing Railway variables working if they still contain the original template names.
+WHATSAPP_CONFIRMATION_TEMPLATE = {
+    "upperroom_booking_confirmation": "upperroom_booking_confirmation1"
+}.get(WHATSAPP_CONFIRMATION_TEMPLATE, WHATSAPP_CONFIRMATION_TEMPLATE)
+WHATSAPP_REMINDER_TEMPLATE = {
+    "upperroom_reminder": "upperroom_reminder1"
+}.get(WHATSAPP_REMINDER_TEMPLATE, WHATSAPP_REMINDER_TEMPLATE)
+WHATSAPP_PASTOR_TEMPLATE = {
+    "upperroom_pastor_daily_summary": "upperroom_pastor_daily_summary1"
+}.get(WHATSAPP_PASTOR_TEMPLATE, WHATSAPP_PASTOR_TEMPLATE)
 
 PASTOR_EMAIL = os.environ.get("PASTOR_EMAIL", "")
 PASTOR_NAME = os.environ.get("PASTOR_NAME", "James")
@@ -137,7 +148,7 @@ class ManualWhatsAppRequest(BaseModel):
     phone_number: str = Field(..., min_length=6)
     template_name: str = Field(
         ...,
-        pattern="^(upperroom_booking_confirmation|upperroom_reminder|upperroom_pastor_daily_summary)$",
+        pattern="^(upperroom_booking_confirmation1?|upperroom_reminder1?|upperroom_pastor_daily_summary1?)$",
     )
     date: str
     full_name: Optional[str] = None
@@ -860,7 +871,12 @@ async def admin_send_whatsapp_template(request_data: ManualWhatsAppRequest, requ
     try:
         formatted_date = format_whatsapp_date(request_data.date)
         normalized_phone = normalize_whatsapp_number(request_data.phone_number)
-        if request_data.template_name == "upperroom_pastor_daily_summary":
+        template_name = {
+            "upperroom_booking_confirmation": "upperroom_booking_confirmation1",
+            "upperroom_reminder": "upperroom_reminder1",
+            "upperroom_pastor_daily_summary": "upperroom_pastor_daily_summary1",
+        }.get(request_data.template_name, request_data.template_name)
+        if template_name == "upperroom_pastor_daily_summary1":
             if not request_data.prayer_leader or not request_data.worship_leader:
                 raise HTTPException(status_code=400, detail="Prayer and Worship leader names are required for the pastor summary.")
             parameters = [formatted_date, request_data.prayer_leader.strip(), request_data.worship_leader.strip()]
@@ -870,17 +886,17 @@ async def admin_send_whatsapp_template(request_data: ManualWhatsAppRequest, requ
                 raise HTTPException(status_code=400, detail="Full name and Lead are required for this template.")
             parameters = [request_data.full_name.strip(), formatted_date, request_data.role]
             participant_name = request_data.full_name.strip()
-        result = await asyncio.to_thread(_send_whatsapp_template, normalized_phone, request_data.template_name, parameters, True)
+        result = await asyncio.to_thread(_send_whatsapp_template, normalized_phone, template_name, parameters, True)
         await write_audit_log(
             "manual_whatsapp",
             "Manual WhatsApp sent",
-            f"Template {request_data.template_name} sent successfully.",
+            f"Template {template_name} sent successfully.",
             level="success",
             participant_name=participant_name,
-            details={"template": request_data.template_name, "phone": mask_phone(normalized_phone), "date": request_data.date},
+            details={"template": template_name, "phone": mask_phone(normalized_phone), "date": request_data.date},
             request=request,
         )
-        return {"message": "WhatsApp message sent successfully", "template": request_data.template_name, "phone_number": normalized_phone, "result": result}
+        return {"message": "WhatsApp message sent successfully", "template": template_name, "phone_number": normalized_phone, "result": result}
     except HTTPException:
         raise
     except ValueError as exc:
