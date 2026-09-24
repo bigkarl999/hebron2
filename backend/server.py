@@ -473,7 +473,7 @@ async def flag_unresolved_whatsapp_failure(outbox: dict, error_text: Optional[st
         return
     now_iso = datetime.now(timezone.utc).isoformat()
     await db.whatsapp_outbox.update_one(
-        {"id": outbox.get("id"), "admin_alerted_at": {"$exists": False}},
+        {"id": outbox.get("id"), "$or": [{"admin_alerted_at": None}, {"admin_alerted_at": {"$exists": False}}]},
         {"$set": {"admin_alerted_at": now_iso, "updated_at": now_iso}},
     )
     await write_audit_log(
@@ -1315,6 +1315,15 @@ async def update_booking(booking_id: str, update_data: BookingUpdate, request: R
             update_dict["whatsapp_reminder_status"] = "pending"
     effective_phone = update_dict.get("phone_number", existing.get("phone_number"))
     effective_opt_in = update_dict.get("whatsapp_opt_in", existing.get("whatsapp_opt_in", False))
+
+    core_changed = any(
+        key in update_dict and update_dict.get(key) != existing.get(key)
+        for key in ("full_name", "date", "role")
+    )
+    if core_changed and effective_phone:
+        update_dict["whatsapp_confirmation_status"] = "pending"
+        update_dict["whatsapp_reminder_status"] = "pending"
+        update_dict["whatsapp_last_error"] = None
     if effective_opt_in and not effective_phone:
         raise HTTPException(status_code=400, detail="A WhatsApp number is required when WhatsApp notifications are enabled.")
     if "date" in update_dict or "role" in update_dict:
