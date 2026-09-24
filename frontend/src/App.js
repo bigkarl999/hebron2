@@ -11,6 +11,10 @@ import AdminReports from "@/pages/AdminReports";
 import AdminLogs from "@/pages/AdminLogs";
 import PrivacyPolicyPage from "@/pages/PrivacyPolicyPage";
 import NotFoundPage from "@/pages/NotFoundPage";
+import WhatsAppMessagesPage from "@/pages/WhatsAppMessagesPage";
+import SystemHealthPage from "@/pages/SystemHealthPage";
+import AdminTodayPage from "@/pages/AdminTodayPage";
+import InstallAppPage from "@/pages/InstallAppPage";
 import ProtectedRoute from "@/components/ProtectedRoute";
 
 function App() {
@@ -22,8 +26,33 @@ function App() {
           <Route path="/book" element={<BookSlotPage />} />
           <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/privacy" element={<PrivacyPolicyPage />} />
+          <Route path="/install" element={<InstallAppPage />} />
           <Route path="/admin/login" element={<AdminLoginPage />} />
-          <Route path="*" element={<NotFoundPage />} />
+
+          <Route
+            path="/admin/today"
+            element={
+              <ProtectedRoute>
+                <AdminTodayPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/whatsapp"
+            element={
+              <ProtectedRoute>
+                <WhatsAppMessagesPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/system-health"
+            element={
+              <ProtectedRoute>
+                <SystemHealthPage />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/admin/dashboard"
             element={
@@ -56,6 +85,7 @@ function App() {
               </ProtectedRoute>
             }
           />
+          <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </BrowserRouter>
       <Toaster position="top-center" richColors />
