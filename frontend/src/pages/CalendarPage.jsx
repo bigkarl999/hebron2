@@ -15,6 +15,8 @@ import {
   Loader2,
   Music,
   Sparkles,
+  List,
+  Grid3X3,
 } from "lucide-react";
 import {
   addDays,
@@ -33,6 +35,7 @@ const CalendarPage = () => {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [availability, setAvailability] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [mobileView, setMobileView] = useState("list");
 
   useEffect(() => {
     const fetchAvailability = async () => {
@@ -174,6 +177,38 @@ const CalendarPage = () => {
           </div>
         </div>
 
+        <div className="mb-4 md:hidden">
+          <div className="mx-auto grid max-w-sm grid-cols-2 rounded-2xl border border-orange-100 bg-white p-1 shadow-sm">
+            <button
+              type="button"
+              onClick={() => setMobileView("list")}
+              className={`flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
+                mobileView === "list"
+                  ? "bg-gradient-to-r from-orange-500 to-red-600 text-white shadow-sm"
+                  : "text-muted-foreground hover:bg-orange-50"
+              }`}
+            >
+              <List className="h-4 w-4" />
+              Easy View
+            </button>
+            <button
+              type="button"
+              onClick={() => setMobileView("calendar")}
+              className={`flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
+                mobileView === "calendar"
+                  ? "bg-gradient-to-r from-orange-500 to-red-600 text-white shadow-sm"
+                  : "text-muted-foreground hover:bg-orange-50"
+              }`}
+            >
+              <Grid3X3 className="h-4 w-4" />
+              Calendar View
+            </button>
+          </div>
+          <p className="mt-2 text-center text-xs text-muted-foreground">
+            Calendar View also lets you browse previous bookings and earlier months.
+          </p>
+        </div>
+
         <Card className="card-warm mb-5">
           <CardContent className="p-3 sm:p-4">
             <div className="flex items-center justify-between">
@@ -207,7 +242,7 @@ const CalendarPage = () => {
           </Card>
         ) : (
           <>
-            <div className="space-y-3 md:hidden">
+            <div className={`${mobileView === "list" ? "space-y-3" : "hidden"} md:hidden`}>
               {daysInMonth
                 .filter((date) => validMeetingDay(date) && date >= todayStart)
                 .map((date) => {
@@ -236,6 +271,103 @@ const CalendarPage = () => {
                   );
                 })}
             </div>
+
+            <Card className={`card-warm overflow-hidden md:hidden ${mobileView === "calendar" ? "block" : "hidden"}`}>
+              <CardContent className="p-0">
+                <div className="border-b border-orange-100 bg-orange-50 px-4 py-3">
+                  <div className="text-sm font-medium">Full calendar</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">
+                    Swipe sideways to see the whole week. Past bookings remain visible.
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <div className="min-w-[760px]">
+                    <div className="grid grid-cols-7 border-b border-orange-100 bg-orange-50">
+                      {weekDays.map((day) => (
+                        <div
+                          key={day}
+                          className={`p-3 text-center text-sm font-medium ${
+                            ["Fri", "Sat", "Sun"].includes(day)
+                              ? "text-muted-foreground/50"
+                              : "text-foreground"
+                          }`}
+                        >
+                          {day}
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="grid grid-cols-7">
+                      {Array.from({ length: adjustedStartDay }).map((_, index) => (
+                        <div
+                          key={`mobile-empty-${index}`}
+                          className="min-h-[135px] border-b border-r border-orange-50 bg-gray-50/50"
+                        />
+                      ))}
+
+                      {daysInMonth.map((day) => {
+                        const info = infoFor(day);
+                        const valid = validMeetingDay(day);
+                        const past = day < todayStart;
+                        return (
+                          <div
+                            key={`mobile-calendar-${day.toISOString()}`}
+                            className={`min-h-[135px] border-b border-r border-orange-50 p-2 ${
+                              isToday(day) ? "ring-2 ring-inset ring-orange-400" : ""
+                            } ${!valid || past ? "bg-gray-50/60" : "bg-white"}`}
+                          >
+                            <div
+                              className={`mb-2 flex items-center justify-between text-sm font-semibold ${
+                                isToday(day)
+                                  ? "text-orange-600"
+                                  : !valid || past
+                                  ? "text-muted-foreground/50"
+                                  : ""
+                              }`}
+                            >
+                              <span>{format(day, "d")}</span>
+                              {isToday(day) && (
+                                <span className="rounded-full bg-orange-100 px-1.5 py-0.5 text-[10px] font-medium text-orange-700">
+                                  Today
+                                </span>
+                              )}
+                            </div>
+
+                            {valid && info && (
+                              <div className="space-y-2">
+                                <SlotButton
+                                  compact
+                                  date={day}
+                                  role="Prayer"
+                                  available={info.prayer_available}
+                                  bookedBy={info.prayer_booked_by}
+                                />
+                                <SlotButton
+                                  compact
+                                  date={day}
+                                  role="Worship"
+                                  available={info.worship_available}
+                                  bookedBy={info.worship_booked_by}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+
+                      {Array.from({
+                        length: (7 - ((adjustedStartDay + daysInMonth.length) % 7)) % 7,
+                      }).map((_, index) => (
+                        <div
+                          key={`mobile-empty-end-${index}`}
+                          className="min-h-[135px] border-b border-r border-orange-50 bg-gray-50/50"
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
             <Card className="card-warm hidden overflow-hidden md:block">
               <CardContent className="p-0 lg:p-4">
