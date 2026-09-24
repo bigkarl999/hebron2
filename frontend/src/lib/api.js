@@ -51,6 +51,11 @@ export const getAdminBookings = (filters = {}) => {
 
 export const getAdminToday = () => api.get("/admin/today");
 export const getWhatsAppStatus = () => api.get("/admin/whatsapp/status");
+export const getWhatsAppMessages = (status = "all", limit = 150) =>
+  api.get(`/admin/whatsapp/messages?status=${encodeURIComponent(status)}&limit=${limit}`);
+export const retryWhatsAppMessage = (id) =>
+  api.post(`/admin/whatsapp/messages/${id}/retry`);
+export const getSystemHealth = () => api.get("/admin/system-health");
 export const getAdminLogs = (filters = {}) => {
   const params = new URLSearchParams();
   if (filters.event_type && filters.event_type !== "all") params.append("event_type", filters.event_type);

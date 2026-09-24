@@ -101,6 +101,7 @@ const AdminDashboard = () => {
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [editData, setEditData] = useState({});
   const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
+  const [sendUpdatedConfirmation, setSendUpdatedConfirmation] = useState(false);
   const [sendNowType, setSendNowType] = useState("reminder");
   const [manualWhatsapp, setManualWhatsapp] = useState({
     phone_number: "",
@@ -163,6 +164,7 @@ const AdminDashboard = () => {
       phone_number: booking.phone_number ? formatPhoneInput(booking.phone_number) : "",
       whatsapp_opt_in: Boolean(booking.whatsapp_opt_in),
     });
+    setSendUpdatedConfirmation(false);
     setEditDialogOpen(true);
   };
 
@@ -177,7 +179,16 @@ const AdminDashboard = () => {
         ...editData,
         whatsapp_opt_in: Boolean(editData.phone_number?.trim()),
       });
-      toast.success("Booking updated successfully");
+      if (sendUpdatedConfirmation && editData.phone_number?.trim()) {
+        try {
+          await sendBookingWhatsAppNow(selectedBooking.id, "confirmation");
+          toast.success("Booking updated and new confirmation sent");
+        } catch (sendError) {
+          toast.warning("Booking updated, but the new confirmation could not be sent");
+        }
+      } else {
+        toast.success("Booking updated successfully");
+      }
       setEditDialogOpen(false);
       refreshAll();
     } catch (error) {
@@ -312,6 +323,25 @@ const AdminDashboard = () => {
           </div>
           <Button variant="outline" onClick={refreshAll} className="gap-2"><RefreshCw className="h-4 w-4" />Refresh</Button>
         </div>
+
+        {today?.unresolved_whatsapp_failures > 0 && (
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-red-800">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+              <div>
+                <div className="font-semibold">
+                  {today.unresolved_whatsapp_failures} WhatsApp failure{today.unresolved_whatsapp_failures === 1 ? "" : "s"} need attention
+                </div>
+                <div className="mt-1 text-sm">Automatic delivery could not resolve these messages.</div>
+              </div>
+            </div>
+            <a href="/admin/whatsapp">
+              <Button size="sm" variant="outline" className="border-red-200 bg-white hover:bg-red-50">
+                Review messages
+              </Button>
+            </a>
+          </div>
+        )}
 
         <div className="mb-6 grid gap-4 xl:grid-cols-3">
           <Card className="xl:col-span-2">
@@ -465,8 +495,23 @@ const AdminDashboard = () => {
               <div className="space-y-2"><Label>Full Name</Label><Input value={editData.full_name || ""} onChange={(e) => setEditData({ ...editData, full_name: e.target.value })} /></div>
               <div className="space-y-2"><Label>Role</Label><Select value={editData.role} onValueChange={(value) => setEditData({ ...editData, role: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Prayer">Prayer</SelectItem><SelectItem value="Worship">Worship</SelectItem></SelectContent></Select></div>
               <div className="space-y-2"><Label>Date</Label><Input type="date" value={editData.date || ""} onChange={(e) => setEditData({ ...editData, date: e.target.value })} /></div>
+              <div className="rounded-xl border border-orange-100 bg-orange-50/60 p-3 text-xs text-muted-foreground">
+                Changing the participant, role or date marks the WhatsApp confirmation and reminder as pending so the delivery state is not misleading.
+              </div>
               <div className="space-y-2"><Label>WhatsApp Number</Label><Input type="tel" value={editData.phone_number || ""} onChange={(e) => setEditData({ ...editData, phone_number: formatPhoneInput(e.target.value) })} placeholder="07xxx xxxxxx or +44..." /><p className="text-xs text-muted-foreground">If a number is present, WhatsApp notifications are enabled automatically.</p></div>
               <div className="space-y-2"><Label>Status</Label><Select value={editData.status} onValueChange={(value) => setEditData({ ...editData, status: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Booked">Booked</SelectItem><SelectItem value="Cancelled">Cancelled</SelectItem></SelectContent></Select></div>
+            </div>
+            <div className="flex items-center gap-2 rounded-xl border border-orange-100 bg-white p-3">
+              <input
+                id="send-updated-confirmation"
+                type="checkbox"
+                checked={sendUpdatedConfirmation}
+                onChange={(e) => setSendUpdatedConfirmation(e.target.checked)}
+                className="h-4 w-4"
+              />
+              <Label htmlFor="send-updated-confirmation" className="text-sm font-normal">
+                Send a fresh WhatsApp confirmation after saving
+              </Label>
             </div>
             <DialogFooter><Button variant="outline" onClick={() => setEditDialogOpen(false)}>Cancel</Button><Button onClick={handleSaveEdit} className="btn-primary">Save Changes</Button></DialogFooter>
           </DialogContent>

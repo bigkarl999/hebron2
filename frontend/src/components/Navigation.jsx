@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import { Menu, X, Calendar, BookOpen, Shield, Video } from "lucide-react";
+import { Menu, X, Calendar, BookOpen, Shield, Video, Download } from "lucide-react";
 
 const ZOOM_LINK = "https://us02web.zoom.us/j/9033071964";
 const LOGO_URL = "https://customer-assets.emergentagent.com/job_hebron-schedule/artifacts/o14uwphq_hpalogo.png";
@@ -14,6 +14,7 @@ export const Navigation = () => {
   const navLinks = [
     { href: "/book", label: "Book a Slot", icon: BookOpen },
     { href: "/calendar", label: "Calendar", icon: Calendar },
+    { href: "/install", label: "Install App", icon: Download },
     { href: "/admin/login", label: "Admin", icon: Shield },
   ];
 

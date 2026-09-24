@@ -8,6 +8,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Activity,
+  CalendarClock,
+  MessageCircle,
+  HeartPulse,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -19,7 +22,10 @@ export const AdminSidebar = () => {
   const [collapsed, setCollapsed] = useState(false);
 
   const menuItems = [
+    { href: "/admin/today", label: "Today", icon: CalendarClock },
     { href: "/admin/dashboard", label: "Bookings", icon: LayoutDashboard },
+    { href: "/admin/whatsapp", label: "WhatsApp", icon: MessageCircle },
+    { href: "/admin/system-health", label: "Health", icon: HeartPulse },
     { href: "/admin/logs", label: "Logs", icon: Activity },
     { href: "/admin/analytics", label: "Analytics", icon: BarChart3 },
     { href: "/admin/reports", label: "Reports", icon: FileText },
@@ -88,16 +94,16 @@ export const AdminSidebar = () => {
       </aside>
 
       <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-orange-100 bg-white/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur md:hidden">
-        <div className="mx-auto flex max-w-lg items-center justify-around">
+        <div className="mx-auto flex max-w-full items-center gap-1 overflow-x-auto">
           {menuItems.map((item) => (
-            <Link key={item.href} to={item.href} className="flex-1">
+            <Link key={item.href} to={item.href} className="min-w-[72px] flex-1">
               <div className={`flex flex-col items-center gap-1 rounded-lg px-1 py-2 text-[10px] ${isActive(item.href) ? "bg-orange-50 text-orange-600" : "text-muted-foreground"}`}>
                 <item.icon className="h-5 w-5" />
                 <span>{item.label}</span>
               </div>
             </Link>
           ))}
-          <button type="button" onClick={handleLogout} className="flex flex-1 flex-col items-center gap-1 rounded-lg px-1 py-2 text-[10px] text-red-600">
+          <button type="button" onClick={handleLogout} className="flex min-w-[72px] flex-1 flex-col items-center gap-1 rounded-lg px-1 py-2 text-[10px] text-red-600">
             <LogOut className="h-5 w-5" />
             <span>Logout</span>
           </button>
