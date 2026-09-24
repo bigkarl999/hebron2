@@ -69,15 +69,22 @@ import { format } from "date-fns";
 
 const deliveryBadge = (status) => {
   const value = status || "not_requested";
-  if (value === "sent") return "bg-green-100 text-green-700";
+  if (value === "read") return "bg-blue-100 text-blue-700";
+  if (value === "delivered") return "bg-green-100 text-green-700";
+  if (value === "sent") return "bg-emerald-100 text-emerald-700";
+  if (value === "accepted") return "bg-cyan-100 text-cyan-700";
   if (value === "failed") return "bg-red-100 text-red-700";
-  if (value === "pending") return "bg-amber-100 text-amber-700";
+  if (value === "pending" || value === "retrying") return "bg-amber-100 text-amber-700";
   return "bg-slate-100 text-slate-600";
 };
 
 const deliveryLabel = (status) => {
+  if (status === "read") return "Read";
+  if (status === "delivered") return "Delivered";
   if (status === "sent") return "Sent";
+  if (status === "accepted") return "Accepted by Meta";
   if (status === "failed") return "Failed";
+  if (status === "retrying") return "Retrying";
   if (status === "pending") return "Pending";
   return "Not requested";
 };
@@ -326,6 +333,8 @@ const AdminDashboard = () => {
               <div className="flex items-center justify-between"><span>Service</span><span className={`rounded-full px-2 py-1 text-xs font-medium ${whatsAppStatus?.healthy ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>{whatsAppStatus?.healthy ? "Ready" : "Needs attention"}</span></div>
               <div className="flex items-center justify-between"><span>Automatic sends</span><span>{whatsAppStatus?.enabled ? "Enabled" : "Disabled"}</span></div>
               <div className="flex items-center justify-between"><span>Templates</span><span>{whatsAppStatus?.templates_configured ? "Configured" : "Missing"}</span></div>
+              <div className="flex items-center justify-between"><span>Delivery webhook</span><span>{whatsAppStatus?.webhook_verify_token_configured ? "Configured" : "Setup needed"}</span></div>
+              <div className="flex items-center justify-between"><span>Auto retry</span><span>{whatsAppStatus?.max_retries ?? 1} retry max</span></div>
               <div className="flex items-center justify-between"><span>Pastor number</span><span>{whatsAppStatus?.pastor_number_configured ? "Configured" : "Missing"}</span></div>
               <div className="flex items-center justify-between"><span>Language</span><span className="font-mono text-xs">{whatsAppStatus?.language || "-"}</span></div>
               <div className="rounded-lg bg-muted/40 p-2 text-xs text-muted-foreground">Reminder: {today?.reminder_time || "4:00 PM UK"} · Pastor summary: {today?.pastor_summary_time || "19:00 UK"}</div>
