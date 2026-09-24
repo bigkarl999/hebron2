@@ -320,6 +320,15 @@ def classify_browser(user_agent: str) -> str:
     return "Other"
 
 
+def is_automated_visitor(user_agent: str) -> bool:
+    ua = (user_agent or "").lower()
+    bot_tokens = (
+        "bot", "crawler", "spider", "slurp", "preview", "facebookexternalhit",
+        "whatsapp", "telegrambot", "discordbot", "linkedinbot", "headlesschrome",
+    )
+    return not ua or any(token in ua for token in bot_tokens)
+
+
 async def write_audit_log(
     event_type: str,
     title: str,
@@ -1142,6 +1151,8 @@ async def track_visitor(ping: VisitorPing, request: Request):
     uk_now = now_utc.astimezone(UK_TZ)
     date_uk = uk_now.strftime("%Y-%m-%d")
     user_agent = request.headers.get("user-agent", "")[:300]
+    if is_automated_visitor(user_agent):
+        return {"status": "ignored", "reason": "automated_client"}
     location = get_request_location(request, ping.timezone)
     network = get_masked_network(request)
     device = classify_device(user_agent, ping.screen_width)
