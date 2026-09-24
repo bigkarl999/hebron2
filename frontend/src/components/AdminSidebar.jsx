@@ -11,6 +11,7 @@ import {
   CalendarClock,
   MessageCircle,
   HeartPulse,
+  UsersRound,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -28,6 +29,7 @@ export const AdminSidebar = () => {
     { href: "/admin/system-health", label: "Health", icon: HeartPulse },
     { href: "/admin/logs", label: "Logs", icon: Activity },
     { href: "/admin/analytics", label: "Analytics", icon: BarChart3 },
+    { href: "/admin/visitors", label: "Visitors", icon: UsersRound },
     { href: "/admin/reports", label: "Reports", icon: FileText },
   ];
 
