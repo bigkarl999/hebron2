@@ -173,6 +173,17 @@ class BookingWhatsAppSendRequest(BaseModel):
     message_type: str = Field(..., pattern="^(confirmation|reminder)$")
 
 
+class VisitorPing(BaseModel):
+    visitor_id: str = Field(..., min_length=8, max_length=128)
+    session_id: str = Field(..., min_length=8, max_length=128)
+    path: str = Field(default="/", max_length=300)
+    event_type: str = Field(default="page_view", pattern="^(page_view|heartbeat)$")
+    referrer: Optional[str] = Field(default=None, max_length=500)
+    timezone: Optional[str] = Field(default=None, max_length=100)
+    language: Optional[str] = Field(default=None, max_length=40)
+    screen_width: Optional[int] = Field(default=None, ge=0, le=20000)
+
+
 def format_name_display(full_name: str) -> str:
     parts = full_name.strip().split()
     if len(parts) >= 2:
@@ -241,6 +252,81 @@ def get_client_ip(request: Request) -> str:
     if len(parts) == 4:
         return ".".join(parts[:3]) + ".0/24"
     return "masked"
+
+
+
+def get_masked_network(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "")
+    if not ip:
+        return "unknown"
+    if ":" in ip:
+        parts = [part for part in ip.split(":") if part]
+        return ":".join(parts[:3]) + "::/48" if parts else "ipv6"
+    parts = ip.split(".")
+    if len(parts) == 4:
+        return ".".join(parts[:2]) + ".x.x"
+    return "masked"
+
+
+def get_request_location(request: Request, timezone_name: Optional[str] = None) -> dict:
+    # Prefer coarse location headers supplied by a hosting/CDN layer.
+    # We intentionally do not call a third-party GeoIP service or store a full IP address.
+    country = (
+        request.headers.get("cf-ipcountry")
+        or request.headers.get("x-vercel-ip-country")
+        or request.headers.get("cloudfront-viewer-country")
+        or request.headers.get("x-country-code")
+    )
+    region = (
+        request.headers.get("x-vercel-ip-country-region")
+        or request.headers.get("x-region")
+        or request.headers.get("cf-region")
+    )
+    city = (
+        request.headers.get("x-vercel-ip-city")
+        or request.headers.get("x-city")
+        or request.headers.get("cf-ipcity")
+    )
+    return {
+        "country": country or "Unknown",
+        "region": region or None,
+        "city": city or None,
+        "timezone": timezone_name or "Unknown",
+    }
+
+
+def classify_device(user_agent: str, screen_width: Optional[int] = None) -> str:
+    ua = (user_agent or "").lower()
+    if "ipad" in ua or "tablet" in ua:
+        return "Tablet"
+    if "mobile" in ua or "iphone" in ua or "android" in ua or (screen_width and screen_width < 768):
+        return "Mobile"
+    return "Desktop"
+
+
+def classify_browser(user_agent: str) -> str:
+    ua = (user_agent or "").lower()
+    if "edg/" in ua:
+        return "Edge"
+    if "opr/" in ua or "opera" in ua:
+        return "Opera"
+    if "firefox/" in ua:
+        return "Firefox"
+    if "chrome/" in ua and "edg/" not in ua:
+        return "Chrome"
+    if "safari/" in ua and "chrome/" not in ua:
+        return "Safari"
+    return "Other"
+
+
+def is_automated_visitor(user_agent: str) -> bool:
+    ua = (user_agent or "").lower()
+    bot_tokens = (
+        "bot", "crawler", "spider", "slurp", "preview", "facebookexternalhit",
+        "whatsapp", "telegrambot", "discordbot", "linkedinbot", "headlesschrome",
+    )
+    return not ua or any(token in ua for token in bot_tokens)
 
 
 async def write_audit_log(
@@ -1054,6 +1140,236 @@ async def get_public_bookings():
     return bookings
 
 
+
+@api_router.post("/analytics/visit")
+async def track_visitor(ping: VisitorPing, request: Request):
+    # Do not count visits to protected admin pages as public-site visitors.
+    if ping.path.startswith("/admin"):
+        return {"status": "ignored"}
+
+    now_utc = datetime.now(timezone.utc)
+    uk_now = now_utc.astimezone(UK_TZ)
+    date_uk = uk_now.strftime("%Y-%m-%d")
+    user_agent = request.headers.get("user-agent", "")[:300]
+    if is_automated_visitor(user_agent):
+        return {"status": "ignored", "reason": "automated_client"}
+    location = get_request_location(request, ping.timezone)
+    network = get_masked_network(request)
+    device = classify_device(user_agent, ping.screen_width)
+    browser = classify_browser(user_agent)
+
+    first_seen_existing = await db.visitor_sessions.find_one(
+        {"session_id": ping.session_id}, {"_id": 0, "first_seen": 1}
+    )
+    session_update = {
+        "session_id": ping.session_id,
+        "visitor_id": ping.visitor_id,
+        "last_seen": now_utc,
+        "current_path": ping.path,
+        "location": location,
+        "network": network,
+        "device": device,
+        "browser": browser,
+        "language": ping.language,
+        "user_agent": user_agent,
+    }
+    await db.visitor_sessions.update_one(
+        {"session_id": ping.session_id},
+        {
+            "$set": session_update,
+            "$setOnInsert": {"first_seen": now_utc},
+        },
+        upsert=True,
+    )
+
+    if ping.event_type == "page_view":
+        await db.visitor_events.insert_one({
+            "id": str(uuid.uuid4()),
+            "timestamp": now_utc,
+            "date_uk": date_uk,
+            "visitor_id": ping.visitor_id,
+            "session_id": ping.session_id,
+            "path": ping.path,
+            "referrer": ping.referrer,
+            "location": location,
+            "network": network,
+            "device": device,
+            "browser": browser,
+            "language": ping.language,
+        })
+    return {"status": "ok"}
+
+
+@api_router.get("/admin/visitors")
+async def get_visitor_analytics(
+    days: int = Query(30, ge=7, le=365),
+    admin: dict = Depends(verify_admin_token),
+):
+    now_utc = datetime.now(timezone.utc)
+    active_cutoff = now_utc - timedelta(seconds=90)
+    start_utc = now_utc - timedelta(days=days - 1)
+    today_uk = now_utc.astimezone(UK_TZ).strftime("%Y-%m-%d")
+
+    active_visitors = await db.visitor_sessions.distinct(
+        "visitor_id", {"last_seen": {"$gte": active_cutoff}}
+    )
+    today_unique = await db.visitor_events.distinct("visitor_id", {"date_uk": today_uk})
+    today_views = await db.visitor_events.count_documents({"date_uk": today_uk})
+    today_sessions = await db.visitor_events.distinct("session_id", {"date_uk": today_uk})
+    total_views = await db.visitor_events.count_documents({})
+    all_unique = await db.visitor_events.distinct("visitor_id", {})
+    all_sessions = await db.visitor_events.distinct("session_id", {})
+
+    daily_pipeline = [
+        {"$match": {"timestamp": {"$gte": start_utc}}},
+        {"$group": {
+            "_id": {"date": "$date_uk", "visitor": "$visitor_id"},
+            "views": {"$sum": 1},
+        }},
+        {"$group": {
+            "_id": "$_id.date",
+            "unique_visitors": {"$sum": 1},
+            "page_views": {"$sum": "$views"},
+        }},
+        {"$sort": {"_id": 1}},
+    ]
+    daily_raw = await db.visitor_events.aggregate(daily_pipeline).to_list(days + 5)
+    daily_map = {item["_id"]: item for item in daily_raw}
+    daily = []
+    current_day = (now_utc.astimezone(UK_TZ) - timedelta(days=days - 1)).date()
+    for offset in range(days):
+        day = current_day + timedelta(days=offset)
+        key = day.strftime("%Y-%m-%d")
+        item = daily_map.get(key, {})
+        daily.append({
+            "date": key,
+            "unique_visitors": int(item.get("unique_visitors", 0)),
+            "page_views": int(item.get("page_views", 0)),
+        })
+
+    top_pages_pipeline = [
+        {"$match": {"timestamp": {"$gte": start_utc}}},
+        {"$group": {
+            "_id": {"path": "$path", "visitor": "$visitor_id"},
+            "views": {"$sum": 1},
+        }},
+        {"$group": {
+            "_id": "$_id.path",
+            "page_views": {"$sum": "$views"},
+            "unique_visitors": {"$sum": 1},
+        }},
+        {"$sort": {"page_views": -1}},
+        {"$limit": 12},
+    ]
+    top_pages_raw = await db.visitor_events.aggregate(top_pages_pipeline).to_list(12)
+
+    locations_pipeline = [
+        {"$match": {"timestamp": {"$gte": start_utc}}},
+        {"$group": {
+            "_id": {
+                "country": "$location.country",
+                "region": "$location.region",
+                "city": "$location.city",
+                "timezone": "$location.timezone",
+                "visitor": "$visitor_id",
+            },
+            "views": {"$sum": 1},
+        }},
+        {"$group": {
+            "_id": {
+                "country": "$_id.country",
+                "region": "$_id.region",
+                "city": "$_id.city",
+                "timezone": "$_id.timezone",
+            },
+            "unique_visitors": {"$sum": 1},
+            "page_views": {"$sum": "$views"},
+        }},
+        {"$sort": {"unique_visitors": -1, "page_views": -1}},
+        {"$limit": 15},
+    ]
+    locations_raw = await db.visitor_events.aggregate(locations_pipeline).to_list(15)
+
+    devices_pipeline = [
+        {"$match": {"timestamp": {"$gte": start_utc}}},
+        {"$group": {"_id": "$device", "page_views": {"$sum": 1}}},
+        {"$sort": {"page_views": -1}},
+    ]
+    devices_raw = await db.visitor_events.aggregate(devices_pipeline).to_list(10)
+    networks_pipeline = [
+        {"$match": {"timestamp": {"$gte": start_utc}}},
+        {"$group": {
+            "_id": {"network": "$network", "visitor": "$visitor_id"},
+            "views": {"$sum": 1},
+        }},
+        {"$group": {
+            "_id": "$_id.network",
+            "unique_visitors": {"$sum": 1},
+            "page_views": {"$sum": "$views"},
+        }},
+        {"$sort": {"unique_visitors": -1, "page_views": -1}},
+        {"$limit": 12},
+    ]
+    networks_raw = await db.visitor_events.aggregate(networks_pipeline).to_list(12)
+
+
+    recent = await db.visitor_sessions.find(
+        {},
+        {
+            "_id": 0,
+            "visitor_id": 0,
+            "session_id": 0,
+            "user_agent": 0,
+        },
+    ).sort("last_seen", -1).to_list(50)
+
+    return {
+        "range_days": days,
+        "active_now": len(active_visitors),
+        "today_unique": len(today_unique),
+        "today_page_views": today_views,
+        "today_sessions": len(today_sessions),
+        "total_page_views": total_views,
+        "total_sessions": len(all_sessions),
+        "total_unique_visitors": len(all_unique),
+        "daily": daily,
+        "top_pages": [
+            {
+                "path": item["_id"] or "/",
+                "page_views": item["page_views"],
+                "unique_visitors": item["unique_visitors"],
+            }
+            for item in top_pages_raw
+        ],
+        "locations": [
+            {
+                "country": (item["_id"] or {}).get("country") or "Unknown",
+                "region": (item["_id"] or {}).get("region"),
+                "city": (item["_id"] or {}).get("city"),
+                "timezone": (item["_id"] or {}).get("timezone") or "Unknown",
+                "unique_visitors": item["unique_visitors"],
+                "page_views": item["page_views"],
+            }
+            for item in locations_raw
+        ],
+        "devices": [
+            {"device": item["_id"] or "Unknown", "page_views": item["page_views"]}
+            for item in devices_raw
+        ],
+        "networks": [
+            {
+                "network": item["_id"] or "unknown",
+                "unique_visitors": item["unique_visitors"],
+                "page_views": item["page_views"],
+            }
+            for item in networks_raw
+        ],
+        "recent_visitors": recent,
+        "active_window_seconds": 90,
+        "privacy_note": "Visitors are counted with an anonymous browser identifier. Full IP addresses are not stored; only a masked network prefix and coarse location headers/timezone are retained.",
+    }
+
+
 @api_router.post("/admin/login")
 async def admin_login(credentials: AdminLogin, request: Request):
     if not ADMIN_PASSWORD:
@@ -1602,6 +1918,10 @@ async def startup_scheduler():
         logger.warning("JWT_SECRET is not set; a temporary secret was generated for this process.")
     if not ADMIN_PASSWORD:
         logger.warning("ADMIN_PASSWORD is not set; admin login is disabled until it is configured.")
+    await db.visitor_events.create_index("timestamp", expireAfterSeconds=31536000)
+    await db.visitor_events.create_index([("date_uk", 1), ("visitor_id", 1)])
+    await db.visitor_sessions.create_index("last_seen", expireAfterSeconds=7776000)
+    await db.visitor_sessions.create_index([("visitor_id", 1), ("last_seen", -1)])
     scheduler.add_job(send_daily_reminders, CronTrigger(hour=16, minute=0, timezone=UK_TZ), id="daily_reminder", replace_existing=True)
     scheduler.add_job(send_pastor_daily_summary, CronTrigger(hour=PASTOR_EMAIL_HOUR, minute=PASTOR_EMAIL_MINUTE, timezone=UK_TZ), id="pastor_summary", replace_existing=True)
     scheduler.add_job(process_whatsapp_retries, IntervalTrigger(minutes=1), id="whatsapp_retry_worker", replace_existing=True)
