@@ -36,8 +36,10 @@ const CalendarPage = () => {
   const [availability, setAvailability] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [mobileView, setMobileView] = useState("list");
+  const [selectedDay, setSelectedDay] = useState(null);
 
   useEffect(() => {
+    setSelectedDay(null);
     const fetchAvailability = async () => {
       setIsLoading(true);
       try {
@@ -201,11 +203,11 @@ const CalendarPage = () => {
               }`}
             >
               <Grid3X3 className="h-4 w-4" />
-              Calendar View
+              Month View
             </button>
           </div>
           <p className="mt-2 text-center text-xs text-muted-foreground">
-            Calendar View also lets you browse previous bookings and earlier months.
+            Month View shows the whole rota. Tap any meeting day to see Prayer and Worship details.
           </p>
         </div>
 
@@ -272,102 +274,227 @@ const CalendarPage = () => {
                 })}
             </div>
 
-            <Card className={`card-warm overflow-hidden md:hidden ${mobileView === "calendar" ? "block" : "hidden"}`}>
-              <CardContent className="p-0">
-                <div className="border-b border-orange-100 bg-orange-50 px-4 py-3">
-                  <div className="text-sm font-medium">Full calendar</div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">
-                    Swipe sideways to see the whole week. Past bookings remain visible.
-                  </div>
-                </div>
-                <div className="overflow-x-auto">
-                  <div className="min-w-[760px]">
-                    <div className="grid grid-cols-7 border-b border-orange-100 bg-orange-50">
-                      {weekDays.map((day) => (
-                        <div
-                          key={day}
-                          className={`p-3 text-center text-sm font-medium ${
-                            ["Fri", "Sat", "Sun"].includes(day)
-                              ? "text-muted-foreground/50"
-                              : "text-foreground"
-                          }`}
-                        >
-                          {day}
+            <div className={`md:hidden ${mobileView === "calendar" ? "block" : "hidden"}`}>
+              <Card className="card-warm overflow-hidden">
+                <CardContent className="p-0">
+                  <div className="border-b border-orange-100 bg-orange-50/80 px-4 py-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold">Month overview</div>
+                        <div className="mt-0.5 text-xs text-muted-foreground">
+                          Tap a meeting day to see who led Prayer and Worship.
                         </div>
-                      ))}
+                      </div>
+                      <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+                        <span className="inline-flex items-center gap-1">
+                          <span className="h-2.5 w-2.5 rounded-full bg-orange-400" />
+                          Booked
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <span className="h-2.5 w-2.5 rounded-full bg-green-400" />
+                          Available
+                        </span>
+                      </div>
                     </div>
+                  </div>
 
-                    <div className="grid grid-cols-7">
-                      {Array.from({ length: adjustedStartDay }).map((_, index) => (
-                        <div
-                          key={`mobile-empty-${index}`}
-                          className="min-h-[135px] border-b border-r border-orange-50 bg-gray-50/50"
-                        />
-                      ))}
+                  <div className="grid grid-cols-7 border-b border-orange-100 bg-white">
+                    {weekDays.map((day) => (
+                      <div
+                        key={day}
+                        className={`py-2 text-center text-[11px] font-semibold uppercase tracking-wide ${
+                          ["Fri", "Sat", "Sun"].includes(day)
+                            ? "text-muted-foreground/40"
+                            : "text-muted-foreground"
+                        }`}
+                      >
+                        {day.slice(0, 1)}
+                      </div>
+                    ))}
+                  </div>
 
-                      {daysInMonth.map((day) => {
-                        const info = infoFor(day);
-                        const valid = validMeetingDay(day);
-                        const past = day < todayStart;
-                        return (
-                          <div
-                            key={`mobile-calendar-${day.toISOString()}`}
-                            className={`min-h-[135px] border-b border-r border-orange-50 p-2 ${
-                              isToday(day) ? "ring-2 ring-inset ring-orange-400" : ""
-                            } ${!valid || past ? "bg-gray-50/60" : "bg-white"}`}
-                          >
-                            <div
-                              className={`mb-2 flex items-center justify-between text-sm font-semibold ${
+                  <div className="grid grid-cols-7">
+                    {Array.from({ length: adjustedStartDay }).map((_, index) => (
+                      <div
+                        key={`compact-empty-${index}`}
+                        className="aspect-square border-b border-r border-orange-50 bg-gray-50/40"
+                      />
+                    ))}
+
+                    {daysInMonth.map((day) => {
+                      const info = infoFor(day);
+                      const valid = validMeetingDay(day);
+                      const past = day < todayStart;
+                      const selected =
+                        selectedDay &&
+                        format(selectedDay, "yyyy-MM-dd") === format(day, "yyyy-MM-dd");
+                      const prayerState = info
+                        ? info.prayer_available
+                          ? "available"
+                          : "booked"
+                        : "none";
+                      const worshipState = info
+                        ? info.worship_available
+                          ? "available"
+                          : "booked"
+                        : "none";
+                      const dotClass = (state) =>
+                        state === "booked"
+                          ? "bg-orange-400"
+                          : state === "available"
+                          ? "bg-green-400"
+                          : "bg-slate-200";
+
+                      return (
+                        <button
+                          type="button"
+                          key={`compact-${day.toISOString()}`}
+                          disabled={!valid}
+                          onClick={() => valid && setSelectedDay(day)}
+                          className={`relative aspect-square border-b border-r border-orange-50 p-1.5 text-left transition-all ${
+                            !valid
+                              ? "cursor-default bg-gray-50/50 text-muted-foreground/30"
+                              : past
+                              ? "bg-slate-50/70 text-muted-foreground"
+                              : "bg-white hover:bg-orange-50"
+                          } ${selected ? "z-10 ring-2 ring-inset ring-orange-400" : ""}`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span
+                              className={`text-sm font-semibold ${
                                 isToday(day)
-                                  ? "text-orange-600"
-                                  : !valid || past
-                                  ? "text-muted-foreground/50"
+                                  ? "flex h-6 w-6 items-center justify-center rounded-full bg-orange-600 text-white"
                                   : ""
                               }`}
                             >
-                              <span>{format(day, "d")}</span>
-                              {isToday(day) && (
-                                <span className="rounded-full bg-orange-100 px-1.5 py-0.5 text-[10px] font-medium text-orange-700">
-                                  Today
-                                </span>
-                              )}
-                            </div>
+                              {format(day, "d")}
+                            </span>
+                          </div>
 
-                            {valid && info && (
-                              <div className="space-y-2">
-                                <SlotButton
-                                  compact
-                                  date={day}
-                                  role="Prayer"
-                                  available={info.prayer_available}
-                                  bookedBy={info.prayer_booked_by}
-                                />
-                                <SlotButton
-                                  compact
-                                  date={day}
-                                  role="Worship"
-                                  available={info.worship_available}
-                                  bookedBy={info.worship_booked_by}
+                          {valid && (
+                            <div className="absolute bottom-2 left-1/2 flex -translate-x-1/2 items-center gap-1">
+                              <span
+                                className={`h-2.5 w-2.5 rounded-full ring-1 ring-white ${dotClass(prayerState)}`}
+                                aria-label={`Prayer ${prayerState}`}
+                              />
+                              <span
+                                className={`h-2.5 w-2.5 rounded-full ring-1 ring-white ${dotClass(worshipState)}`}
+                                aria-label={`Worship ${worshipState}`}
+                              />
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
+
+                    {Array.from({
+                      length: (7 - ((adjustedStartDay + daysInMonth.length) % 7)) % 7,
+                    }).map((_, index) => (
+                      <div
+                        key={`compact-empty-end-${index}`}
+                        className="aspect-square border-b border-r border-orange-50 bg-gray-50/40"
+                      />
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {selectedDay && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="mt-4"
+                >
+                  {(() => {
+                    const info = infoFor(selectedDay);
+                    const past = selectedDay < todayStart;
+                    const bookable = canBookDate(selectedDay);
+
+                    const DetailRow = ({ role, available, bookedBy }) => {
+                      const Icon = role === "Prayer" ? HandHeart : Music;
+                      return (
+                        <div className="rounded-2xl border border-orange-100 bg-white p-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                              <div
+                                className={`flex h-10 w-10 items-center justify-center rounded-xl ${
+                                  role === "Prayer" ? "bg-blue-50" : "bg-purple-50"
+                                }`}
+                              >
+                                <Icon
+                                  className={`h-5 w-5 ${
+                                    role === "Prayer" ? "text-blue-600" : "text-purple-600"
+                                  }`}
                                 />
                               </div>
+                              <div>
+                                <div className="font-semibold">{role}</div>
+                                <div className="mt-0.5 text-sm text-muted-foreground">
+                                  {available
+                                    ? past
+                                      ? "No booking recorded"
+                                      : "Available"
+                                    : bookedBy || "Booked"}
+                                </div>
+                              </div>
+                            </div>
+
+                            {!past && bookable && available && (
+                              <Button
+                                size="sm"
+                                onClick={() => book(selectedDay, role)}
+                                className="btn-primary px-4"
+                              >
+                                Book
+                              </Button>
                             )}
                           </div>
-                        );
-                      })}
+                        </div>
+                      );
+                    };
 
-                      {Array.from({
-                        length: (7 - ((adjustedStartDay + daysInMonth.length) % 7)) % 7,
-                      }).map((_, index) => (
-                        <div
-                          key={`mobile-empty-end-${index}`}
-                          className="min-h-[135px] border-b border-r border-orange-50 bg-gray-50/50"
-                        />
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+                    return (
+                      <Card className="card-warm border-orange-200">
+                        <CardContent className="p-4">
+                          <div className="mb-4 flex items-start justify-between gap-3">
+                            <div>
+                              <div className="text-xs font-semibold uppercase tracking-wide text-orange-600">
+                                {past ? "Previous rota" : isToday(selectedDay) ? "Today" : "Selected day"}
+                              </div>
+                              <h3 className="mt-1 font-['Playfair_Display'] text-xl font-semibold">
+                                {format(selectedDay, "EEEE, d MMMM yyyy")}
+                              </h3>
+                              <p className="mt-1 text-sm text-muted-foreground">
+                                8:00 PM - 9:00 PM UK
+                              </p>
+                            </div>
+                          </div>
+
+                          {info ? (
+                            <div className="space-y-3">
+                              <DetailRow
+                                role="Prayer"
+                                available={info.prayer_available}
+                                bookedBy={info.prayer_booked_by}
+                              />
+                              <DetailRow
+                                role="Worship"
+                                available={info.worship_available}
+                                bookedBy={info.worship_booked_by}
+                              />
+                            </div>
+                          ) : (
+                            <div className="rounded-xl bg-slate-50 p-4 text-sm text-muted-foreground">
+                              No rota information is available for this date.
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    );
+                  })()}
+                </motion.div>
+              )}
+            </div>
 
             <Card className="card-warm hidden overflow-hidden md:block">
               <CardContent className="p-0 lg:p-4">
