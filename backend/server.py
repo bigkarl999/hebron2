@@ -182,6 +182,9 @@ class VisitorPing(BaseModel):
     timezone: Optional[str] = Field(default=None, max_length=100)
     language: Optional[str] = Field(default=None, max_length=40)
     screen_width: Optional[int] = Field(default=None, ge=0, le=20000)
+    city: Optional[str] = Field(default=None, max_length=120)
+    region: Optional[str] = Field(default=None, max_length=120)
+    country: Optional[str] = Field(default=None, max_length=120)
 
 
 def format_name_display(full_name: str) -> str:
@@ -1154,6 +1157,13 @@ async def track_visitor(ping: VisitorPing, request: Request):
     if is_automated_visitor(user_agent):
         return {"status": "ignored", "reason": "automated_client"}
     location = get_request_location(request, ping.timezone)
+    if ping.city or ping.region or ping.country:
+        location = {
+            "country": ping.country or location.get("country") or "Unknown",
+            "region": ping.region or location.get("region"),
+            "city": ping.city or location.get("city"),
+            "timezone": ping.timezone or location.get("timezone") or "Unknown",
+        }
     network = get_masked_network(request)
     device = classify_device(user_agent, ping.screen_width)
     browser = classify_browser(user_agent)
@@ -1366,7 +1376,8 @@ async def get_visitor_analytics(
         ],
         "recent_visitors": recent,
         "active_window_seconds": 90,
-        "privacy_note": "Visitors are counted with an anonymous browser identifier. Full IP addresses are not stored; only a masked network prefix and coarse location headers/timezone are retained.",
+        "location_accuracy_note": "IP-based city geolocation is approximate and may reflect an ISP, mobile carrier or VPN exit point rather than the visitor's exact physical location.",
+        "privacy_note": "Visitors are counted with an anonymous browser identifier. Full IP addresses are not stored. Approximate city/region/country may be resolved in the visitor's browser by an IP-geolocation service, then only that approximate location plus a masked network prefix is retained.",
     }
 
 
