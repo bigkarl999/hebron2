@@ -36,6 +36,7 @@ export const createBooking = (data) => api.post("/bookings", data);
 export const getAvailability = (startDate, endDate) =>
   api.get(`/bookings/availability?start_date=${startDate}&end_date=${endDate}`);
 export const getPublicBookings = () => api.get("/bookings/public");
+export const trackVisitor = (data) => api.post("/analytics/visit", data);
 
 export const adminLogin = (username, password) =>
   api.post("/admin/login", { username, password });
@@ -56,6 +57,7 @@ export const getWhatsAppMessages = (status = "all", limit = 150) =>
 export const retryWhatsAppMessage = (id) =>
   api.post(`/admin/whatsapp/messages/${id}/retry`);
 export const getSystemHealth = () => api.get("/admin/system-health");
+export const getVisitorAnalytics = (days = 30) => api.get(`/admin/visitors?days=${days}`);
 export const getAdminLogs = (filters = {}) => {
   const params = new URLSearchParams();
   if (filters.event_type && filters.event_type !== "all") params.append("event_type", filters.event_type);
