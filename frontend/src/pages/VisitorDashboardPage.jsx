@@ -262,6 +262,55 @@ const VisitorDashboardPage = () => {
               </Card>
             </div>
 
+            <div className="mb-6 grid gap-5 xl:grid-cols-2">
+              <Card className="border-orange-100">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <Wifi className="h-5 w-5 text-orange-600" />
+                    Top masked networks
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    {(data.networks || []).length === 0 ? (
+                      <div className="py-8 text-center text-sm text-muted-foreground">No network data yet.</div>
+                    ) : data.networks.map((item, index) => (
+                      <div key={item.network + index} className="flex items-center justify-between gap-3 rounded-xl border border-orange-100 bg-white p-3">
+                        <div>
+                          <div className="font-mono text-sm font-medium">{item.network}</div>
+                          <div className="mt-1 text-xs text-muted-foreground">{item.page_views} page views</div>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-semibold">{item.unique_visitors}</div>
+                          <div className="text-[10px] text-muted-foreground">unique</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-4 text-xs leading-5 text-muted-foreground">
+                    These are masked network prefixes, not full IP addresses. They help show repeated traffic patterns without exposing a visitor's exact address.
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card className="border-orange-100">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <Globe2 className="h-5 w-5 text-orange-600" />
+                    What “location” means
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm text-muted-foreground">
+                  <p>
+                    Country, region or city is shown only when the hosting/CDN layer supplies that information. Otherwise the dashboard falls back to the browser's timezone.
+                  </p>
+                  <p>
+                    This keeps the dashboard useful while avoiding storage of full IP addresses or exact GPS-style location.
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+
             <Card className="border-orange-100">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-lg">
