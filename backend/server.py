@@ -46,6 +46,9 @@ WHATSAPP_ENABLED = os.environ.get("WHATSAPP_ENABLED", "false").strip().lower() i
 }
 WHATSAPP_API_VERSION = os.environ.get("WHATSAPP_API_VERSION", "v26.0")
 WHATSAPP_TEMPLATE_LANGUAGE = os.environ.get("WHATSAPP_TEMPLATE_LANGUAGE", "en")
+WHATSAPP_WEBHOOK_VERIFY_TOKEN = os.environ.get("WHATSAPP_WEBHOOK_VERIFY_TOKEN", "")
+WHATSAPP_MAX_RETRIES = max(0, int(os.environ.get("WHATSAPP_MAX_RETRIES", "1")))
+WHATSAPP_RETRY_DELAY_SECONDS = max(30, int(os.environ.get("WHATSAPP_RETRY_DELAY_SECONDS", "120")))
 WHATSAPP_CONFIRMATION_TEMPLATE = os.environ.get(
     "WHATSAPP_CONFIRMATION_TEMPLATE", "upperroom_booking_confirmation1"
 )
@@ -124,8 +127,16 @@ class Booking(BaseModel):
     whatsapp_opt_in: bool = False
     whatsapp_confirmation_status: str = "not_requested"
     whatsapp_confirmation_sent_at: Optional[str] = None
+    whatsapp_confirmation_delivered_at: Optional[str] = None
+    whatsapp_confirmation_read_at: Optional[str] = None
+    whatsapp_confirmation_message_id: Optional[str] = None
+    whatsapp_confirmation_retry_count: int = 0
     whatsapp_reminder_status: str = "not_requested"
     whatsapp_reminder_sent_at: Optional[str] = None
+    whatsapp_reminder_delivered_at: Optional[str] = None
+    whatsapp_reminder_read_at: Optional[str] = None
+    whatsapp_reminder_message_id: Optional[str] = None
+    whatsapp_reminder_retry_count: int = 0
     whatsapp_last_error: Optional[str] = None
     edited_by_admin: bool = False
     last_updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -271,14 +282,14 @@ def _send_whatsapp_template(
         if raise_on_error:
             raise RuntimeError(message)
         logger.info(message)
-        return {"success": False, "skipped": True, "reason": message}
+        return {"success": False, "skipped": True, "reason": message, "retryable": False}
 
     if not WHATSAPP_ACCESS_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
         message = "WhatsApp API credentials are not fully configured."
         if raise_on_error:
             raise RuntimeError(message)
         logger.error(message)
-        return {"success": False, "reason": message}
+        return {"success": False, "reason": message, "retryable": False}
 
     try:
         normalized_number = normalize_whatsapp_number(to_number)
@@ -311,18 +322,40 @@ def _send_whatsapp_template(
             body_snippet = (resp.text or "")[:1000]
             message = f"WhatsApp send failed. Status={resp.status_code}. Response={body_snippet}"
             logger.error(message)
+            retryable = resp.status_code == 429 or resp.status_code >= 500
             if raise_on_error:
                 raise RuntimeError(message)
-            return {"success": False, "status_code": resp.status_code, "reason": body_snippet}
+            return {
+                "success": False,
+                "status_code": resp.status_code,
+                "reason": body_snippet,
+                "retryable": retryable,
+            }
         response_data = resp.json() if resp.content else {}
-        logger.info("WhatsApp template %s sent to %s", template_name, normalized_number)
-        return {"success": True, "response": response_data}
+        messages = response_data.get("messages") or []
+        message_id = messages[0].get("id") if messages and isinstance(messages[0], dict) else None
+        logger.info(
+            "WhatsApp template %s accepted by Meta for %s (message_id=%s)",
+            template_name,
+            normalized_number,
+            message_id or "unknown",
+        )
+        return {
+            "success": True,
+            "response": response_data,
+            "message_id": message_id,
+            "retryable": False,
+        }
+    except requests.RequestException as exc:
+        logger.error("WhatsApp network request failed for template %s: %s", template_name, exc)
+        if raise_on_error:
+            raise
+        return {"success": False, "reason": str(exc), "retryable": True}
     except Exception as exc:
         logger.error("Failed to send WhatsApp template %s: %s", template_name, exc)
         if raise_on_error:
             raise
-        return {"success": False, "reason": str(exc)}
-
+        return {"success": False, "reason": str(exc), "retryable": False}
 
 def send_booking_confirmation_whatsapp(booking: dict) -> dict:
     return _send_whatsapp_template(
@@ -422,35 +455,183 @@ def send_pastor_leading_email(pastor_email: str, pastor_name: str, today_str: st
     _send_email_via_resend(pastor_email, subject, html)
 
 
+async def record_whatsapp_outbox(
+    result: dict,
+    phone_number: str,
+    template_name: str,
+    body_parameters: List[str],
+    message_type: str,
+    source: str,
+    booking_id: Optional[str] = None,
+    participant_name: Optional[str] = None,
+    retry_count: int = 0,
+    parent_message_id: Optional[str] = None,
+) -> dict:
+    now_iso = datetime.now(timezone.utc).isoformat()
+    message_id = result.get("message_id")
+    status = "accepted" if result.get("success") else "failed"
+    doc = {
+        "id": str(uuid.uuid4()),
+        "message_id": message_id,
+        "parent_message_id": parent_message_id,
+        "booking_id": booking_id,
+        "participant_name": participant_name,
+        "phone_number": normalize_whatsapp_number(phone_number),
+        "template_name": template_name,
+        "body_parameters": [str(value) for value in body_parameters],
+        "message_type": message_type,
+        "source": source,
+        "status": status,
+        "retry_count": retry_count,
+        "retry_scheduled": False,
+        "last_error": None if result.get("success") else (result.get("reason") or "WhatsApp send failed")[:1000],
+        "created_at": now_iso,
+        "updated_at": now_iso,
+        "accepted_at": now_iso if result.get("success") else None,
+        "sent_at": None,
+        "delivered_at": None,
+        "read_at": None,
+        "failed_at": now_iso if not result.get("success") else None,
+    }
+    await db.whatsapp_outbox.insert_one(doc)
+    return doc
+
+
+async def retry_whatsapp_outbox(outbox_id: str):
+    await asyncio.sleep(WHATSAPP_RETRY_DELAY_SECONDS)
+    outbox = await db.whatsapp_outbox.find_one({"id": outbox_id}, {"_id": 0})
+    if not outbox or outbox.get("status") != "failed":
+        return
+    retry_count = int(outbox.get("retry_count", 0))
+    if retry_count >= WHATSAPP_MAX_RETRIES:
+        return
+
+    await db.whatsapp_outbox.update_one(
+        {"id": outbox_id},
+        {"$set": {"retry_scheduled": False, "updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    result = await asyncio.to_thread(
+        _send_whatsapp_template,
+        outbox.get("phone_number", ""),
+        outbox.get("template_name", ""),
+        outbox.get("body_parameters") or [],
+        False,
+    )
+    new_retry_count = retry_count + 1
+    retry_doc = await record_whatsapp_outbox(
+        result,
+        outbox.get("phone_number", ""),
+        outbox.get("template_name", ""),
+        outbox.get("body_parameters") or [],
+        outbox.get("message_type", "unknown"),
+        "automatic_retry",
+        booking_id=outbox.get("booking_id"),
+        participant_name=outbox.get("participant_name"),
+        retry_count=new_retry_count,
+        parent_message_id=outbox.get("message_id"),
+    )
+
+    booking_id = outbox.get("booking_id")
+    message_type = outbox.get("message_type")
+    if booking_id and message_type in {"confirmation", "reminder"}:
+        prefix = f"whatsapp_{message_type}"
+        update = {
+            f"{prefix}_status": "accepted" if result.get("success") else "failed",
+            f"{prefix}_retry_count": new_retry_count,
+            "whatsapp_last_error": None if result.get("success") else (result.get("reason") or "WhatsApp retry failed")[:500],
+            "last_updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if retry_doc.get("message_id"):
+            update[f"{prefix}_message_id"] = retry_doc["message_id"]
+        await db.bookings.update_one({"id": booking_id}, {"$set": update})
+
+    await write_audit_log(
+        "whatsapp_retry",
+        "WhatsApp automatic retry accepted" if result.get("success") else "WhatsApp automatic retry failed",
+        f"{outbox.get('message_type', 'Message')} retry attempt {new_retry_count} of {WHATSAPP_MAX_RETRIES}.",
+        level="success" if result.get("success") else "error",
+        booking_id=booking_id,
+        participant_name=outbox.get("participant_name"),
+        details={
+            "template": outbox.get("template_name"),
+            "message_type": outbox.get("message_type"),
+            "retry_count": new_retry_count,
+            "meta_message_id": retry_doc.get("message_id"),
+            "phone": mask_phone(outbox.get("phone_number")),
+        },
+    )
+
+    if not result.get("success") and result.get("retryable") and new_retry_count < WHATSAPP_MAX_RETRIES:
+        await db.whatsapp_outbox.update_one({"id": retry_doc["id"]}, {"$set": {"retry_scheduled": True}})
+        asyncio.create_task(retry_whatsapp_outbox(retry_doc["id"]))
+
+
+async def schedule_outbox_retry(outbox: dict):
+    if int(outbox.get("retry_count", 0)) >= WHATSAPP_MAX_RETRIES:
+        return
+    updated = await db.whatsapp_outbox.update_one(
+        {"id": outbox["id"], "retry_scheduled": {"$ne": True}},
+        {"$set": {"retry_scheduled": True, "updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    if updated.modified_count:
+        asyncio.create_task(retry_whatsapp_outbox(outbox["id"]))
+
+
 async def send_booking_whatsapp_and_record(booking: dict, message_type: str, source: str = "automatic") -> dict:
     booking_id = booking.get("id")
     if message_type == "confirmation":
         result = await asyncio.to_thread(send_booking_confirmation_whatsapp, booking)
         status_field = "whatsapp_confirmation_status"
         sent_field = "whatsapp_confirmation_sent_at"
+        message_id_field = "whatsapp_confirmation_message_id"
+        retry_field = "whatsapp_confirmation_retry_count"
         event_type = "whatsapp_confirmation"
         label = "booking confirmation"
+        template_name = WHATSAPP_CONFIRMATION_TEMPLATE
     else:
         result = await asyncio.to_thread(send_booking_reminder_whatsapp, booking)
         status_field = "whatsapp_reminder_status"
         sent_field = "whatsapp_reminder_sent_at"
+        message_id_field = "whatsapp_reminder_message_id"
+        retry_field = "whatsapp_reminder_retry_count"
         event_type = "whatsapp_reminder"
         label = "same-day reminder"
+        template_name = WHATSAPP_REMINDER_TEMPLATE
+
+    parameters = [
+        booking.get("full_name", ""),
+        format_whatsapp_date(booking.get("date", "")),
+        booking.get("role", ""),
+    ]
+    outbox = await record_whatsapp_outbox(
+        result,
+        booking.get("phone_number", ""),
+        template_name,
+        parameters,
+        message_type,
+        source,
+        booking_id=booking_id,
+        participant_name=booking.get("full_name"),
+    )
 
     now_iso = datetime.now(timezone.utc).isoformat()
     success = bool(result.get("success"))
     update = {
-        status_field: "sent" if success else "failed",
+        status_field: "accepted" if success else "failed",
+        retry_field: 0,
         "whatsapp_last_error": None if success else (result.get("reason") or "WhatsApp send failed")[:500],
         "last_updated_at": now_iso,
     }
     if success:
         update[sent_field] = now_iso
+        if result.get("message_id"):
+            update[message_id_field] = result["message_id"]
     if booking_id:
         await db.bookings.update_one({"id": booking_id}, {"$set": update})
+
     await write_audit_log(
         event_type,
-        f"WhatsApp {label} {'sent' if success else 'failed'}",
+        f"WhatsApp {label} {'accepted by Meta' if success else 'failed'}",
         f"{booking.get('full_name', 'Participant')} — Lead {booking.get('role', '')} on {booking.get('date', '')}",
         level="success" if success else "error",
         booking_id=booking_id,
@@ -459,11 +640,13 @@ async def send_booking_whatsapp_and_record(booking: dict, message_type: str, sou
             "source": source,
             "message_type": message_type,
             "phone": mask_phone(booking.get("phone_number")),
-            "status": "sent" if success else "failed",
+            "status": "accepted" if success else "failed",
+            "meta_message_id": result.get("message_id"),
         },
     )
+    if not success and result.get("retryable"):
+        await schedule_outbox_retry(outbox)
     return result
-
 
 async def send_daily_reminders():
     try:
@@ -510,6 +693,18 @@ async def send_pastor_daily_summary():
         whatsapp_result = None
         if PASTOR_WHATSAPP_NUMBER:
             whatsapp_result = await asyncio.to_thread(send_pastor_summary_whatsapp, PASTOR_WHATSAPP_NUMBER, today_str, prayer_leader, worship_leader)
+            pastor_parameters = [format_whatsapp_date(today_str), prayer_leader, worship_leader]
+            pastor_outbox = await record_whatsapp_outbox(
+                whatsapp_result,
+                PASTOR_WHATSAPP_NUMBER,
+                WHATSAPP_PASTOR_TEMPLATE,
+                pastor_parameters,
+                "pastor_summary",
+                "scheduled_7pm",
+                participant_name=PASTOR_NAME,
+            )
+            if not whatsapp_result.get("success") and whatsapp_result.get("retryable"):
+                await schedule_outbox_retry(pastor_outbox)
         await write_audit_log(
             "pastor_summary",
             "Pastor daily summary processed",
@@ -544,6 +739,120 @@ async def root():
 @api_router.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+
+@api_router.get("/whatsapp/webhook")
+async def verify_whatsapp_webhook(request: Request):
+    mode = request.query_params.get("hub.mode")
+    token = request.query_params.get("hub.verify_token")
+    challenge = request.query_params.get("hub.challenge", "")
+    if (
+        WHATSAPP_WEBHOOK_VERIFY_TOKEN
+        and mode == "subscribe"
+        and token == WHATSAPP_WEBHOOK_VERIFY_TOKEN
+    ):
+        logger.info("WhatsApp webhook verified successfully")
+        return Response(content=challenge, media_type="text/plain")
+    raise HTTPException(status_code=403, detail="WhatsApp webhook verification failed")
+
+
+@api_router.post("/whatsapp/webhook")
+async def receive_whatsapp_webhook(payload: dict):
+    if payload.get("object") != "whatsapp_business_account":
+        return {"status": "ignored"}
+
+    processed = 0
+    for entry in payload.get("entry", []):
+        for change in entry.get("changes", []):
+            value = change.get("value") or {}
+            for item in value.get("statuses", []):
+                message_id = item.get("id")
+                status = item.get("status")
+                if not message_id or status not in {"sent", "delivered", "read", "failed"}:
+                    continue
+
+                timestamp = item.get("timestamp")
+                event_iso = datetime.now(timezone.utc).isoformat()
+                if timestamp:
+                    try:
+                        event_iso = datetime.fromtimestamp(int(timestamp), tz=timezone.utc).isoformat()
+                    except (TypeError, ValueError, OSError):
+                        pass
+
+                errors = item.get("errors") or []
+                first_error = errors[0] if errors and isinstance(errors[0], dict) else {}
+                error_code = first_error.get("code")
+                error_title = first_error.get("title") or first_error.get("message")
+                error_details = (first_error.get("error_data") or {}).get("details")
+                error_text = " | ".join(
+                    str(part) for part in [error_code, error_title, error_details] if part not in (None, "")
+                ) or None
+
+                outbox = await db.whatsapp_outbox.find_one({"message_id": message_id}, {"_id": 0})
+                update = {
+                    "status": status,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "last_error": error_text if status == "failed" else None,
+                    "meta_status_payload": {
+                        "recipient_id": item.get("recipient_id"),
+                        "conversation": item.get("conversation"),
+                        "pricing": item.get("pricing"),
+                    },
+                }
+                if status in {"sent", "delivered", "read", "failed"}:
+                    update[f"{status}_at"] = event_iso
+                await db.whatsapp_outbox.update_one({"message_id": message_id}, {"$set": update})
+
+                if outbox:
+                    booking_id = outbox.get("booking_id")
+                    message_type = outbox.get("message_type")
+                    if booking_id and message_type in {"confirmation", "reminder"}:
+                        prefix = f"whatsapp_{message_type}"
+                        booking_update = {
+                            f"{prefix}_status": status,
+                            "last_updated_at": datetime.now(timezone.utc).isoformat(),
+                        }
+                        if status == "delivered":
+                            booking_update[f"{prefix}_delivered_at"] = event_iso
+                            booking_update["whatsapp_last_error"] = None
+                        elif status == "read":
+                            booking_update[f"{prefix}_read_at"] = event_iso
+                            booking_update[f"{prefix}_delivered_at"] = event_iso
+                            booking_update["whatsapp_last_error"] = None
+                        elif status == "failed":
+                            booking_update["whatsapp_last_error"] = (error_text or "Meta reported delivery failed")[:500]
+
+                        await db.bookings.update_one(
+                            {"id": booking_id, f"{prefix}_message_id": message_id},
+                            {"$set": booking_update},
+                        )
+
+                    await write_audit_log(
+                        "whatsapp_delivery",
+                        f"WhatsApp {status}",
+                        f"Meta reported {status} for {outbox.get('message_type', 'message')}.",
+                        level="error" if status == "failed" else "success",
+                        booking_id=outbox.get("booking_id"),
+                        participant_name=outbox.get("participant_name"),
+                        details={
+                            "status": status,
+                            "meta_message_id": message_id,
+                            "template": outbox.get("template_name"),
+                            "message_type": outbox.get("message_type"),
+                            "retry_count": outbox.get("retry_count", 0),
+                            "error_code": error_code,
+                            "error": error_text,
+                            "phone": mask_phone(outbox.get("phone_number")),
+                        },
+                    )
+
+                    if status == "failed" and int(outbox.get("retry_count", 0)) < WHATSAPP_MAX_RETRIES:
+                        refreshed = await db.whatsapp_outbox.find_one({"id": outbox["id"]}, {"_id": 0})
+                        if refreshed:
+                            await schedule_outbox_retry(refreshed)
+                processed += 1
+
+    return {"status": "ok", "processed": processed}
 
 
 @api_router.post("/bookings", response_model=Booking)
@@ -636,7 +945,26 @@ async def get_availability(start_date: str = Query(...), end_date: str = Query(.
 async def get_public_bookings():
     bookings = await db.bookings.find(
         {"status": "Booked"},
-        {"_id": 0, "email": 0, "notes": 0, "phone_number": 0, "whatsapp_opt_in": 0, "whatsapp_last_error": 0},
+        {
+            "_id": 0,
+            "email": 0,
+            "notes": 0,
+            "phone_number": 0,
+            "whatsapp_opt_in": 0,
+            "whatsapp_last_error": 0,
+            "whatsapp_confirmation_status": 0,
+            "whatsapp_confirmation_sent_at": 0,
+            "whatsapp_confirmation_delivered_at": 0,
+            "whatsapp_confirmation_read_at": 0,
+            "whatsapp_confirmation_message_id": 0,
+            "whatsapp_confirmation_retry_count": 0,
+            "whatsapp_reminder_status": 0,
+            "whatsapp_reminder_sent_at": 0,
+            "whatsapp_reminder_delivered_at": 0,
+            "whatsapp_reminder_read_at": 0,
+            "whatsapp_reminder_message_id": 0,
+            "whatsapp_reminder_retry_count": 0,
+        },
     ).to_list(1000)
     for booking in bookings:
         booking["display_name"] = format_name_display(booking["full_name"])
@@ -689,7 +1017,9 @@ async def get_admin_bookings(
         booking.setdefault("phone_number", None)
         booking.setdefault("whatsapp_opt_in", False)
         booking.setdefault("whatsapp_confirmation_status", "not_requested")
+        booking.setdefault("whatsapp_confirmation_retry_count", 0)
         booking.setdefault("whatsapp_reminder_status", "not_requested")
+        booking.setdefault("whatsapp_reminder_retry_count", 0)
     return bookings
 
 
@@ -718,6 +1048,9 @@ async def get_whatsapp_status(admin: dict = Depends(verify_admin_token)):
         "credentials_configured": credentials_configured,
         "pastor_number_configured": bool(PASTOR_WHATSAPP_NUMBER),
         "templates_configured": templates_configured,
+        "webhook_verify_token_configured": bool(WHATSAPP_WEBHOOK_VERIFY_TOKEN),
+        "max_retries": WHATSAPP_MAX_RETRIES,
+        "retry_delay_seconds": WHATSAPP_RETRY_DELAY_SECONDS,
         "language": WHATSAPP_TEMPLATE_LANGUAGE,
         "api_version": WHATSAPP_API_VERSION,
         "confirmation_template": WHATSAPP_CONFIRMATION_TEMPLATE,
@@ -725,6 +1058,22 @@ async def get_whatsapp_status(admin: dict = Depends(verify_admin_token)):
         "pastor_template": WHATSAPP_PASTOR_TEMPLATE,
         "healthy": WHATSAPP_ENABLED and credentials_configured and templates_configured,
     }
+
+
+@api_router.get("/admin/whatsapp/messages")
+async def get_whatsapp_messages(
+    admin: dict = Depends(verify_admin_token),
+    status: Optional[str] = None,
+    limit: int = Query(100, ge=1, le=300),
+):
+    query = {}
+    if status and status != "all":
+        query["status"] = status
+    messages = await db.whatsapp_outbox.find(
+        query,
+        {"_id": 0, "phone_number": 0, "body_parameters": 0, "meta_status_payload": 0},
+    ).sort("created_at", -1).to_list(limit)
+    return {"messages": messages, "count": len(messages)}
 
 
 @api_router.get("/admin/logs")
@@ -887,13 +1236,31 @@ async def admin_send_whatsapp_template(request_data: ManualWhatsAppRequest, requ
             parameters = [request_data.full_name.strip(), formatted_date, request_data.role]
             participant_name = request_data.full_name.strip()
         result = await asyncio.to_thread(_send_whatsapp_template, normalized_phone, template_name, parameters, True)
+        manual_outbox = await record_whatsapp_outbox(
+            result,
+            normalized_phone,
+            template_name,
+            parameters,
+            "pastor_summary" if template_name == "upperroom_pastor_daily_summary1" else (
+                "confirmation" if template_name == "upperroom_booking_confirmation1" else "reminder"
+            ),
+            "admin_manual",
+            participant_name=participant_name,
+        )
+        if not result.get("success") and result.get("retryable"):
+            await schedule_outbox_retry(manual_outbox)
         await write_audit_log(
             "manual_whatsapp",
             "Manual WhatsApp sent",
             f"Template {template_name} sent successfully.",
             level="success",
             participant_name=participant_name,
-            details={"template": template_name, "phone": mask_phone(normalized_phone), "date": request_data.date},
+            details={
+            "template": template_name,
+            "phone": mask_phone(normalized_phone),
+            "date": request_data.date,
+            "meta_message_id": result.get("message_id"),
+        },
             request=request,
         )
         return {"message": "WhatsApp message sent successfully", "template": template_name, "phone_number": normalized_phone, "result": result}
