@@ -324,6 +324,25 @@ const AdminDashboard = () => {
           <Button variant="outline" onClick={refreshAll} className="gap-2"><RefreshCw className="h-4 w-4" />Refresh</Button>
         </div>
 
+        {today?.unresolved_whatsapp_failures > 0 && (
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-red-800">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+              <div>
+                <div className="font-semibold">
+                  {today.unresolved_whatsapp_failures} WhatsApp failure{today.unresolved_whatsapp_failures === 1 ? "" : "s"} need attention
+                </div>
+                <div className="mt-1 text-sm">Automatic delivery could not resolve these messages.</div>
+              </div>
+            </div>
+            <a href="/admin/whatsapp">
+              <Button size="sm" variant="outline" className="border-red-200 bg-white hover:bg-red-50">
+                Review messages
+              </Button>
+            </a>
+          </div>
+        )}
+
         <div className="mb-6 grid gap-4 xl:grid-cols-3">
           <Card className="xl:col-span-2">
             <CardHeader className="pb-3">
