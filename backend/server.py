@@ -17,6 +17,7 @@ import xlsxwriter
 import asyncio
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 import pytz
 import requests
 
@@ -498,12 +499,15 @@ async def record_whatsapp_outbox(
 
 
 async def retry_whatsapp_outbox(outbox_id: str):
-    await asyncio.sleep(WHATSAPP_RETRY_DELAY_SECONDS)
     outbox = await db.whatsapp_outbox.find_one({"id": outbox_id}, {"_id": 0})
-    if not outbox or outbox.get("status") != "failed":
+    if not outbox or outbox.get("status") != "failed" or not outbox.get("retry_scheduled"):
         return
     retry_count = int(outbox.get("retry_count", 0))
     if retry_count >= WHATSAPP_MAX_RETRIES:
+        await db.whatsapp_outbox.update_one(
+            {"id": outbox_id},
+            {"$set": {"retry_scheduled": False, "updated_at": datetime.now(timezone.utc).isoformat()}},
+        )
         return
 
     await db.whatsapp_outbox.update_one(
@@ -562,19 +566,47 @@ async def retry_whatsapp_outbox(outbox_id: str):
     )
 
     if not result.get("success") and result.get("retryable") and new_retry_count < WHATSAPP_MAX_RETRIES:
-        await db.whatsapp_outbox.update_one({"id": retry_doc["id"]}, {"$set": {"retry_scheduled": True}})
-        asyncio.create_task(retry_whatsapp_outbox(retry_doc["id"]))
+        await schedule_outbox_retry(retry_doc)
 
 
 async def schedule_outbox_retry(outbox: dict):
     if int(outbox.get("retry_count", 0)) >= WHATSAPP_MAX_RETRIES:
         return
-    updated = await db.whatsapp_outbox.update_one(
+    retry_after = datetime.now(timezone.utc) + timedelta(seconds=WHATSAPP_RETRY_DELAY_SECONDS)
+    await db.whatsapp_outbox.update_one(
         {"id": outbox["id"], "retry_scheduled": {"$ne": True}},
-        {"$set": {"retry_scheduled": True, "updated_at": datetime.now(timezone.utc).isoformat()}},
+        {
+            "$set": {
+                "retry_scheduled": True,
+                "retry_after": retry_after.isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        },
     )
-    if updated.modified_count:
-        asyncio.create_task(retry_whatsapp_outbox(outbox["id"]))
+
+
+async def process_whatsapp_retries():
+    try:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        due = await db.whatsapp_outbox.find(
+            {
+                "status": "failed",
+                "retry_scheduled": True,
+                "retry_after": {"$lte": now_iso},
+            },
+            {"_id": 0},
+        ).sort("retry_after", 1).to_list(20)
+        for outbox in due:
+            await retry_whatsapp_outbox(outbox["id"])
+            await asyncio.sleep(0.25)
+    except Exception as exc:
+        logger.error("WhatsApp retry worker failed: %s", exc)
+        await write_audit_log(
+            "whatsapp_retry_worker",
+            "WhatsApp retry worker failed",
+            str(exc),
+            level="error",
+        )
 
 
 async def send_booking_whatsapp_and_record(booking: dict, message_type: str, source: str = "automatic") -> dict:
@@ -1405,8 +1437,9 @@ async def startup_scheduler():
         logger.warning("ADMIN_PASSWORD is not set; admin login is disabled until it is configured.")
     scheduler.add_job(send_daily_reminders, CronTrigger(hour=16, minute=0, timezone=UK_TZ), id="daily_reminder", replace_existing=True)
     scheduler.add_job(send_pastor_daily_summary, CronTrigger(hour=PASTOR_EMAIL_HOUR, minute=PASTOR_EMAIL_MINUTE, timezone=UK_TZ), id="pastor_summary", replace_existing=True)
+    scheduler.add_job(process_whatsapp_retries, IntervalTrigger(minutes=1), id="whatsapp_retry_worker", replace_existing=True)
     scheduler.start()
-    logger.info("Scheduler started (member reminders + pastor summary enabled).")
+    logger.info("Scheduler started (member reminders + pastor summary + WhatsApp retry worker enabled).")
     logger.info("WhatsApp enabled: %s", WHATSAPP_ENABLED)
 
 
