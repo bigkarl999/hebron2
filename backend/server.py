@@ -1110,7 +1110,7 @@ async def get_admin_today(admin: dict = Depends(verify_admin_token)):
     worship = next((b for b in bookings if b.get("role") == "Worship"), None)
     unresolved_failures = await db.whatsapp_outbox.count_documents({
         "status": "failed",
-        "$or": [{"retry_scheduled": False}, {"retry_scheduled": {"$exists": False}}],
+        "admin_alerted_at": {"$nin": [None, ""]},
     })
     return {
         "date": today_str,
@@ -1160,10 +1160,7 @@ async def get_whatsapp_messages(
     ).sort("created_at", -1).to_list(limit)
     for message in messages:
         message["phone"] = mask_phone(message.pop("phone_number", None))
-        message["needs_attention"] = bool(
-            message.get("status") == "failed"
-            and not message.get("retry_scheduled")
-        )
+        message["needs_attention"] = bool(message.get("admin_alerted_at"))
     return {"messages": messages, "count": len(messages)}
 
 
@@ -1241,10 +1238,7 @@ async def get_system_health(admin: dict = Depends(verify_admin_token)):
     )
     unresolved_count = await db.whatsapp_outbox.count_documents({
         "status": "failed",
-        "$or": [
-            {"retry_scheduled": False},
-            {"retry_scheduled": {"$exists": False}},
-        ],
+        "admin_alerted_at": {"$nin": [None, ""]},
     })
     scheduler_jobs = {job.id: str(job.next_run_time) if job.next_run_time else None for job in scheduler.get_jobs()}
     whatsapp_configured = bool(
