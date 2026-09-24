@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   Smartphone,
   UserRound,
+  BarChart3,
 } from "lucide-react";
 
 const Section = ({ icon: Icon, title, children }) => (
@@ -76,6 +77,7 @@ const PrivacyPolicyPage = () => {
                   ["information", "Information we collect"],
                   ["use", "How we use information"],
                   ["whatsapp", "WhatsApp"],
+                  ["analytics", "Visitor analytics"],
                   ["remembered", "Remembered details"],
                   ["access", "Who can access it"],
                   ["third-party", "Third-party services"],
@@ -143,6 +145,7 @@ const PrivacyPolicyPage = () => {
                         "Sending relevant meeting information",
                         "Helping administrators manage the rota",
                         "Troubleshooting technical issues",
+                        "Understanding anonymous website usage",
                         "Preventing misuse of the system",
                       ].map((item) => (
                         <li key={item} className="flex gap-2">
@@ -171,6 +174,26 @@ const PrivacyPolicyPage = () => {
                   </Section>
                 </div>
 
+                <div id="analytics">
+                  <Section icon={BarChart3} title="Visitor analytics">
+                    <p>
+                      We collect limited anonymous usage analytics to understand how the Upper Room website is being used and to help administrators improve the service.
+                    </p>
+                    <p className="mt-3">
+                      This can include page views, an anonymous browser identifier, a temporary browsing-session identifier, the page being viewed, device/browser type, browser language, approximate timezone, and a privacy-masked network prefix.
+                    </p>
+                    <p className="mt-3">
+                      Where our hosting or content-delivery infrastructure supplies coarse location information, such as country, region or city, this may also be recorded for aggregate visitor statistics. We do not store a visitor&apos;s full IP address or GPS location in the visitor analytics system.
+                    </p>
+                    <p className="mt-3">
+                      The anonymous browser identifier is used so repeated visits from the same browser on the same day can be counted as one unique visitor while page views can still be counted separately. The analytics records are not linked to names, phone numbers, email addresses or booking details.
+                    </p>
+                    <p className="mt-3">
+                      Visitor event records are retained for up to approximately 12 months and recent session/activity records for up to approximately 90 days.
+                    </p>
+                  </Section>
+                </div>
+
                 <div id="remembered">
                   <Section icon={Smartphone} title="Remembered details">
                     <p>
@@ -178,6 +201,9 @@ const PrivacyPolicyPage = () => {
                     </p>
                     <p className="mt-3">
                       This information is stored on your device rather than as a separate member profile.
+                    </p>
+                    <p className="mt-3">
+                      The site may also store anonymous visitor and session identifiers in your browser so repeat page views can be measured accurately. Clearing your browser&apos;s site data will reset these identifiers on that device.
                     </p>
                     <p className="mt-3">
                       You can remove these saved details by using the <strong className="font-semibold text-foreground">“Not you? Clear saved details”</strong> option on the booking page or by clearing your browser&apos;s site data.
