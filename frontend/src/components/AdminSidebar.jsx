@@ -8,6 +8,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Activity,
+  CalendarClock,
+  MessageCircle,
+  HeartPulse,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -19,7 +22,10 @@ export const AdminSidebar = () => {
   const [collapsed, setCollapsed] = useState(false);
 
   const menuItems = [
+    { href: "/admin/today", label: "Today", icon: CalendarClock },
     { href: "/admin/dashboard", label: "Bookings", icon: LayoutDashboard },
+    { href: "/admin/whatsapp", label: "WhatsApp", icon: MessageCircle },
+    { href: "/admin/system-health", label: "Health", icon: HeartPulse },
     { href: "/admin/logs", label: "Logs", icon: Activity },
     { href: "/admin/analytics", label: "Analytics", icon: BarChart3 },
     { href: "/admin/reports", label: "Reports", icon: FileText },
