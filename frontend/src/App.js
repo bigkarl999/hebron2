@@ -16,12 +16,15 @@ import SystemHealthPage from "@/pages/SystemHealthPage";
 import AdminTodayPage from "@/pages/AdminTodayPage";
 import InstallAppPage from "@/pages/InstallAppPage";
 import GuidePage from "@/pages/GuidePage";
+import VisitorDashboardPage from "@/pages/VisitorDashboardPage";
+import VisitorTracker from "@/components/VisitorTracker";
 import ProtectedRoute from "@/components/ProtectedRoute";
 
 function App() {
   return (
     <div className="App min-h-screen bg-background">
       <BrowserRouter>
+        <VisitorTracker />
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/book" element={<BookSlotPage />} />
@@ -76,6 +79,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <AdminAnalytics />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/visitors"
+            element={
+              <ProtectedRoute>
+                <VisitorDashboardPage />
               </ProtectedRoute>
             }
           />
