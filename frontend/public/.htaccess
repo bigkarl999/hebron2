@@ -1,0 +1,13 @@
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # Serve real files and directories normally.
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # Send all other requests to React so BrowserRouter can handle routes
+  # such as /privacy, /book, /calendar and /admin/login.
+  RewriteRule ^ index.html [L]
+</IfModule>
