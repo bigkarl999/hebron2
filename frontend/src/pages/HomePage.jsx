@@ -219,6 +219,15 @@ const HomePage = () => {
           </motion.div>
         </div>
       </section>
+
+      <footer className="border-t border-orange-100 bg-white/80">
+        <div className="container mx-auto flex flex-col items-center justify-between gap-3 px-4 py-6 text-sm text-muted-foreground sm:flex-row">
+          <span>© 2026 Hebron Pentecostal Assembly UK</span>
+          <Link to="/privacy" className="font-medium transition-colors hover:text-orange-600">
+            Privacy Policy
+          </Link>
+        </div>
+      </footer>
     </div>
   );
 };
