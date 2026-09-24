@@ -10,6 +10,7 @@ import AdminAnalytics from "@/pages/AdminAnalytics";
 import AdminReports from "@/pages/AdminReports";
 import AdminLogs from "@/pages/AdminLogs";
 import PrivacyPolicyPage from "@/pages/PrivacyPolicyPage";
+import NotFoundPage from "@/pages/NotFoundPage";
 import ProtectedRoute from "@/components/ProtectedRoute";
 
 function App() {
@@ -22,6 +23,7 @@ function App() {
           <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/privacy" element={<PrivacyPolicyPage />} />
           <Route path="/admin/login" element={<AdminLoginPage />} />
+          <Route path="*" element={<NotFoundPage />} />
           <Route
             path="/admin/dashboard"
             element={
