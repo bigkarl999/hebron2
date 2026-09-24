@@ -1285,6 +1285,22 @@ async def get_visitor_analytics(
         {"$sort": {"page_views": -1}},
     ]
     devices_raw = await db.visitor_events.aggregate(devices_pipeline).to_list(10)
+    networks_pipeline = [
+        {"$match": {"timestamp": {"$gte": start_utc}}},
+        {"$group": {
+            "_id": {"network": "$network", "visitor": "$visitor_id"},
+            "views": {"$sum": 1},
+        }},
+        {"$group": {
+            "_id": "$_id.network",
+            "unique_visitors": {"$sum": 1},
+            "page_views": {"$sum": "$views"},
+        }},
+        {"$sort": {"unique_visitors": -1, "page_views": -1}},
+        {"$limit": 12},
+    ]
+    networks_raw = await db.visitor_events.aggregate(networks_pipeline).to_list(12)
+
 
     recent = await db.visitor_sessions.find(
         {},
@@ -1328,6 +1344,14 @@ async def get_visitor_analytics(
         "devices": [
             {"device": item["_id"] or "Unknown", "page_views": item["page_views"]}
             for item in devices_raw
+        ],
+        "networks": [
+            {
+                "network": item["_id"] or "unknown",
+                "unique_visitors": item["unique_visitors"],
+                "page_views": item["page_views"],
+            }
+            for item in networks_raw
         ],
         "recent_visitors": recent,
         "active_window_seconds": 90,
