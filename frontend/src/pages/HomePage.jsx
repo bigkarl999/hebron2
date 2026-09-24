@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import Navigation from "@/components/Navigation";
 import { motion } from "framer-motion";
-import { Calendar, HandHeart, Music, ArrowRight, Clock, Users } from "lucide-react";
+import { Calendar, HandHeart, Music, ArrowRight, Clock, Users, CircleHelp } from "lucide-react";
 
 const HomePage = () => {
   const features = [
@@ -125,6 +125,29 @@ const HomePage = () => {
         </div>
       </section>
 
+      <section className="py-6">
+        <div className="container mx-auto px-4">
+          <Link to="/guide" className="group block">
+            <div className="mx-auto flex max-w-4xl flex-col items-start justify-between gap-4 rounded-2xl border border-orange-100 bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md sm:flex-row sm:items-center">
+              <div className="flex items-start gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-100 text-orange-600">
+                  <CircleHelp className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="font-semibold text-foreground">New to Upper Room?</div>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    See the visual guide for booking, calendar views, WhatsApp reminders, installing the app and more.
+                  </p>
+                </div>
+              </div>
+              <span className="inline-flex items-center gap-1 text-sm font-semibold text-orange-600">
+                View guide <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+              </span>
+            </div>
+          </Link>
+        </div>
+      </section>
+
       {/* Features Section */}
       <section className="py-16 md:py-24">
         <div className="container mx-auto px-4">
@@ -223,9 +246,14 @@ const HomePage = () => {
       <footer className="border-t border-orange-100 bg-white/80">
         <div className="container mx-auto flex flex-col items-center justify-between gap-3 px-4 py-6 text-sm text-muted-foreground sm:flex-row">
           <span>© 2026 Hebron Pentecostal Assembly UK</span>
-          <Link to="/privacy" className="font-medium transition-colors hover:text-orange-600">
-            Privacy Policy
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link to="/guide" className="font-medium transition-colors hover:text-orange-600">
+              How to Use
+            </Link>
+            <Link to="/privacy" className="font-medium transition-colors hover:text-orange-600">
+              Privacy Policy
+            </Link>
+          </div>
         </div>
       </footer>
     </div>

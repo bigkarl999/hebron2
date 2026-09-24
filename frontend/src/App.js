@@ -15,6 +15,7 @@ import WhatsAppMessagesPage from "@/pages/WhatsAppMessagesPage";
 import SystemHealthPage from "@/pages/SystemHealthPage";
 import AdminTodayPage from "@/pages/AdminTodayPage";
 import InstallAppPage from "@/pages/InstallAppPage";
+import GuidePage from "@/pages/GuidePage";
 import ProtectedRoute from "@/components/ProtectedRoute";
 
 function App() {
@@ -27,6 +28,7 @@ function App() {
           <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/privacy" element={<PrivacyPolicyPage />} />
           <Route path="/install" element={<InstallAppPage />} />
+          <Route path="/guide" element={<GuidePage />} />
           <Route path="/admin/login" element={<AdminLoginPage />} />
 
           <Route
