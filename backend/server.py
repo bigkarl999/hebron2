@@ -1204,8 +1204,10 @@ async def get_visitor_analytics(
     )
     today_unique = await db.visitor_events.distinct("visitor_id", {"date_uk": today_uk})
     today_views = await db.visitor_events.count_documents({"date_uk": today_uk})
+    today_sessions = await db.visitor_events.distinct("session_id", {"date_uk": today_uk})
     total_views = await db.visitor_events.count_documents({})
     all_unique = await db.visitor_events.distinct("visitor_id", {})
+    all_sessions = await db.visitor_events.distinct("session_id", {})
 
     daily_pipeline = [
         {"$match": {"timestamp": {"$gte": start_utc}}},
@@ -1299,7 +1301,9 @@ async def get_visitor_analytics(
         "active_now": len(active_visitors),
         "today_unique": len(today_unique),
         "today_page_views": today_views,
+        "today_sessions": len(today_sessions),
         "total_page_views": total_views,
+        "total_sessions": len(all_sessions),
         "total_unique_visitors": len(all_unique),
         "daily": daily,
         "top_pages": [
